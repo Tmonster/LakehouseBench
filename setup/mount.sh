@@ -26,9 +26,9 @@ sudo mkdir $HOME/benchmark_mount
 sudo mount /dev/$mount_name $HOME/benchmark_mount
 
 # make clone of repo on mount
-sudo mkdir $HOME/benchmark_mount/IcebergEngineBenchmarking
+sudo mkdir $HOME/benchmark_mount/LakehouseBench
 sudo chown -R ubuntu:ubuntu $HOME/benchmark_mount
 
 
-git clone https://github.com/Tmonster/IcebergEngineBenchmarking.git $HOME/benchmark_mount/IcebergEngineBenchmarking
-cd $HOME/benchmark_mount/IcebergEngineBenchmarking
+git clone https://github.com/Tmonster/LakehouseBench.git $HOME/benchmark_mount/LakehouseBench
+cd $HOME/benchmark_mount/LakehouseBench

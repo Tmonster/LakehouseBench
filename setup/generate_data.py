@@ -1,6 +1,11 @@
 """
-Generate TPC-H data using DuckDB's built-in tpch extension.
-Refresh data (update/delete sets) is generated via the dbgen binary in the submodule.
+Generate TPC-H base tables using tpchgen-cli (https://github.com/clflushopt/tpchgen-rs),
+a fast, low-memory Rust generator. Refresh data (update/delete sets) is still generated
+via the dbgen binary in the submodule.
+
+Install tpchgen-cli with one of:
+    uv tool install tpchgen-cli
+    pip install tpchgen-cli
 
 Usage:
     python -m setup.generate_data --sf 10
@@ -10,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -61,22 +67,39 @@ _DELETE_COLS: dict[str, str] = {
 
 
 def generate(scale_factor: int, data_dir: Path) -> None:
+    """
+    Generate the 8 TPC-H base tables as Parquet via tpchgen-cli.
+
+    Writes one file per table: data_dir/<table>.parquet (tpchgen-cli's default layout).
+    """
+    if shutil.which("tpchgen-cli") is None:
+        print(
+            "error: tpchgen-cli not found on PATH. Install it with one of:\n"
+            "  uv tool install tpchgen-cli\n"
+            "  pip install tpchgen-cli",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     data_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Generating TPC-H data at scale factor {scale_factor}...")
+    print(f"Generating TPC-H data at scale factor {scale_factor} via tpchgen-cli...")
 
-    db_path = data_dir / "_tpch_gen.duckdb"
-    try:
-        with duckdb.connect(str(db_path)) as conn:
-            conn.execute("INSTALL tpch; LOAD tpch;")
-            conn.execute(f"CALL dbgen(sf={scale_factor});")
+    subprocess.run(
+        [
+            "tpchgen-cli",
+            "--scale-factor", str(scale_factor),
+            "--output-dir", str(data_dir),
+            "--format", "parquet",
+        ],
+        check=True,
+    )
 
-            for table in TPCH_TABLES:
-                out = data_dir / f"{table}.parquet"
-                conn.execute(f"COPY {table} TO '{out}' (FORMAT PARQUET);")
-                row_count = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-                print(f"  {table}: {row_count:,} rows → {out}")
-    finally:
-        db_path.unlink(missing_ok=True)
+    for table in TPCH_TABLES:
+        out = data_dir / f"{table}.parquet"
+        if not out.exists():
+            print(f"error: expected {out} was not produced by tpchgen-cli.", file=sys.stderr)
+            sys.exit(1)
+        print(f"  {table} → {out}")
 
     print("Done.")
 
@@ -161,7 +184,7 @@ def generate_query_streams(scale_factor: int, n_streams: int, data_dir: Path) ->
     Each file contains all 22 queries in the spec-defined permutation order
     for that stream, with parameters substituted for the given scale factor.
 
-    Set n_streams to the number of throughput streams (use _spec_stream_count
+    Set n_streams to the number of throughput streams (use spec_stream_count
     from benchmarks.power to get the correct value for your SF).
     """
     _compile_dbgen()
@@ -279,6 +302,6 @@ if __name__ == "__main__":
         n_sets = args.refresh_sets or (1 + max(1, round(0.1 * args.sf)))
         generate_refresh_data(scale_factor=args.sf, data_dir=data_dir, n_sets=n_sets)
     if args.query_streams:
-        from benchmarks.power import _spec_stream_count
-        n_streams = args.n_streams or _spec_stream_count(args.sf)
+        from benchmarks.power import spec_stream_count
+        n_streams = args.n_streams or spec_stream_count(args.sf)
         generate_query_streams(scale_factor=args.sf, n_streams=n_streams, data_dir=data_dir)
