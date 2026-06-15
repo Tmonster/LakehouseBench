@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument("--engine", required=True, choices=["duckdb", "spark", "athena"])
     parser.add_argument("--benchmark", required=True, choices=BENCHMARK_CHOICES)
     parser.add_argument("--sf", type=int, default=None, help="Override scale factor from config")
-    parser.add_argument("--catalog-config", default="config/catalog.yml")
+    parser.add_argument("--catalog-config", default="config/s3tables_catalog.yml")
     parser.add_argument("--benchmark-config", default="config/benchmark.yml")
     parser.add_argument("--namespace", default=None, help="Namespace (default: auto-generated UUID)")
     parser.add_argument("--keep-tables", action="store_true", help="Skip teardown after run")
@@ -108,7 +108,6 @@ def main() -> None:
 
         elif args.benchmark == "power":
             from benchmarks import power
-            from dataclasses import asdict
             result = power.run(
                 runner=runner,
                 namespace=namespace,
