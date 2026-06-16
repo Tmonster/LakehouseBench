@@ -86,6 +86,10 @@ def _attach_ducklake(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
     metadata_path = props["metadata_path"]
     data_path = props["data_path"]
 
+    # The metadata catalog is always a local file — make sure its directory exists
+    # (on a fresh checkout the parent dir may not exist yet, and ATTACH won't create it).
+    Path(metadata_path).parent.mkdir(parents=True, exist_ok=True)
+
     if is_remote_data_path(data_path):
         # Object-store data path (e.g. s3://): DuckDB needs httpfs + S3 credentials.
         conn.execute("INSTALL httpfs; LOAD httpfs;")

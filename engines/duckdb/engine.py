@@ -43,10 +43,12 @@ class _DuckDBCursorEngine:
         if self._use_transactions:
             self._cursor.execute("BEGIN TRANSACTION READ ONLY")
         rel = self._cursor.execute(sql)
-        if self._use_transactions:
-            self._cursor.execute("COMMIT")
+        # Fetch before COMMIT: another execute() on the same connection invalidates
+        # this result cursor, so fetching after COMMIT would return 0 rows.
         rows = rel.fetchall()
         col_names = [desc[0] for desc in rel.description]
+        if self._use_transactions:
+            self._cursor.execute("COMMIT")
         return rows, col_names, len(rows)
 
     def run_rf1(self, data_dir: Path, namespace: str, set_n: int) -> None:
@@ -118,10 +120,12 @@ class DuckDBEngine(Engine):
         if self._use_transactions:
             self._conn.execute("BEGIN TRANSACTION READ ONLY")
         relation = self._conn.execute(sql)
-        if self._use_transactions:
-            self._conn.execute("COMMIT")
+        # Fetch before COMMIT: another execute() on the same connection invalidates
+        # this result cursor, so fetching after COMMIT would return 0 rows.
         rows = relation.fetchall()
         col_names = [desc[0] for desc in relation.description]
+        if self._use_transactions:
+            self._conn.execute("COMMIT")
         return rows, col_names, len(rows)
 
     def run_rf1(self, data_dir: Path, namespace: str, set_n: int) -> None:

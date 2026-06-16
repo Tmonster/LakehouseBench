@@ -5,5 +5,5 @@ type: ducklake
 table_format: ducklake
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake   # local SQLite metadata catalog
-data_path: s3://my-bucket/ducklake/      # S3 prefix for Parquet data (trailing slash)
+data_path: s3://tom-playground-labs/LakehouseBench/ducklake/      # S3 prefix for Parquet data (trailing slash)
 region: eu-central-1
