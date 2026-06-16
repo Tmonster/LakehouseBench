@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import csv
-import json
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,7 +22,8 @@ class QueryResult:
     run: int
     elapsed_seconds: float
     rows_returned: int
-    timestamp: str
+    query_start_time: str
+    query_end_time: str
     result_correct: bool | None = None
     error: str | None = None
 
@@ -58,12 +58,14 @@ class BenchmarkRunner:
         col_names: list[str] = []
         row_count = 0
 
+        query_start = datetime.now(timezone.utc)
         start = time.perf_counter()
         try:
             rows, col_names, row_count = self.engine.run_query(sql, namespace)
         except Exception as e:
             error = str(e)
         elapsed = time.perf_counter() - start
+        query_end = datetime.now(timezone.utc)
 
         result_correct = None
         if answer_path is not None and error is None:
@@ -78,19 +80,11 @@ class BenchmarkRunner:
             run=run,
             elapsed_seconds=round(elapsed, 4),
             rows_returned=row_count,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            query_start_time=query_start.isoformat(),
+            query_end_time=query_end.isoformat(),
             result_correct=result_correct,
             error=error,
         )
-
-    def write_results(self, results: list[QueryResult], tag: str) -> Path:
-        return self.write_json([asdict(r) for r in results], tag)
-
-    def write_json(self, records: list[dict], tag: str) -> Path:
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        out = self.result_dir / f"{self.engine_name}_{tag}_sf{self.scale_factor}_{ts}.json"
-        out.write_text(json.dumps(records, indent=2))
-        return out
 
     def _verify(self, rows: list[tuple], answer_path: Path) -> bool | None:
         if not answer_path.exists():

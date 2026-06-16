@@ -90,6 +90,9 @@ class DuckDBEngine(Engine):
         # (s3tables, local) go through the Iceberg extension which doesn't.
         self._use_transactions: bool = isinstance(catalog, DuckLakeCatalog)
 
+    def version(self) -> str:
+        return duckdb.__version__
+
     def _use(self, namespace: str) -> None:
         if namespace != self._current_namespace:
             self._conn.execute(f"USE {self._catalog_alias}.{namespace}")

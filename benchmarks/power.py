@@ -47,6 +47,8 @@ class RefreshResult:
     rf: str                  # "RF1", "RF2", or "RF" (combined)
     set_n: int
     elapsed_seconds: float
+    query_start_time: str
+    query_end_time: str
     error: str | None = None
 
 
@@ -150,6 +152,7 @@ def has_refresh_data(data_dir: Path, set_n: int) -> bool:
 
 def time_refresh(engine: Any, data_dir: Path, namespace: str, rf: str, set_n: int) -> RefreshResult:
     error = None
+    query_start = datetime.now(timezone.utc)
     start = time.perf_counter()
     try:
         if rf == "RF1":
@@ -161,7 +164,16 @@ def time_refresh(engine: Any, data_dir: Path, namespace: str, rf: str, set_n: in
             engine.run_rf2(data_dir, namespace, set_n)
     except Exception as e:
         error = str(e)
-    return RefreshResult(rf=rf, set_n=set_n, elapsed_seconds=round(time.perf_counter() - start, 4), error=error)
+    elapsed = round(time.perf_counter() - start, 4)
+    query_end = datetime.now(timezone.utc)
+    return RefreshResult(
+        rf=rf,
+        set_n=set_n,
+        elapsed_seconds=elapsed,
+        query_start_time=query_start.isoformat(),
+        query_end_time=query_end.isoformat(),
+        error=error,
+    )
 
 
 def fork_runner(runner: BenchmarkRunner) -> BenchmarkRunner:

@@ -13,6 +13,9 @@ class SparkEngine(Engine):
         self._spark = None
         self._catalog_alias: str | None = None
 
+    def version(self) -> str:
+        return self._spark.version if self._spark is not None else "unknown"
+
     def setup(self) -> None:
         import os
         import sys

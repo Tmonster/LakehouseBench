@@ -55,9 +55,12 @@ This is also available as `./setup/mount.sh`.
 
 ## Configuration
 
-### Catalog (`config/catalog.yml`)
+### Catalog
 
-**AWS S3 Tables:**
+Select a catalog with `--catalog-config`. The default is `config/s3tables_catalog.yml`;
+`config/ducklake_local.yml` is the self-contained option for DuckDB (no AWS required).
+
+**AWS S3 Tables** (`config/s3tables_catalog.yml`):
 ```yaml
 type: s3tables
 region: eu-central-1
@@ -66,7 +69,7 @@ bucket: my-s3-tables-bucket
 namespace: benchmarks
 ```
 
-**DuckLake (local, DuckDB only):**
+**DuckLake (local, DuckDB only)** (`config/ducklake_local.yml`):
 ```yaml
 type: ducklake
 namespace: benchmarks
@@ -109,6 +112,17 @@ uv run python -m setup.generate_data --sf 10 --refresh --query-streams
 
 ## Running benchmarks
 
+Every run requires the `BENCH_INSTANCE_TYPE` environment variable — it is recorded
+with the results so runs can be attributed to a machine. The benchmark exits
+immediately if it is unset.
+
+```bash
+export BENCH_INSTANCE_TYPE=m5.4xlarge
+```
+
+Any additional `BENCH_*` variables you export (e.g. `BENCH_REGION`, `BENCH_DISK`)
+are captured into the results too — see [Results](#results).
+
 ### Load benchmark
 
 Times how long it takes to provision the TPC-H tables into the catalog. This benchmark performs the data load itself — do not use `--skip-datagen`.
@@ -119,7 +133,7 @@ uv run python run_benchmark.py --engine duckdb --benchmark load --sf 10
 
 ### Analytical benchmark
 
-Runs the 22 TPC-H queries with configurable warmup and benchmark repetitions. No refresh functions. Results are written to `results/`.
+Runs the 22 TPC-H queries with configurable warmup and benchmark repetitions. No refresh functions.
 
 ```bash
 # Provision data and run
@@ -162,10 +176,48 @@ uv run python run_benchmark.py --engine duckdb --benchmark composite --sf 10 \
     --catalog-config config/ducklake_local.yml
 ```
 
+## Results
+
+Every benchmark run appends to two append-only CSV files in `results/`. They
+accumulate across runs (nothing is overwritten) and join on `run_id`:
+
+- **`logs.csv`** — one row per run: `run_id`, `benchmark_start_time`,
+  `benchmark_end_time`, `bench_instance_type`, `benchmark`, `namespace`,
+  `scale_factor`, `engine`, `engine_version`, and the headline scores
+  (`power_score`, `throughput_score`, `composite_score`; blank when not applicable).
+  `benchmark_start_time`/`benchmark_end_time` cover only the query phase —
+  provisioning/data-load is excluded (except for the `load` benchmark, where the
+  load *is* the workload).
+- **`time.csv`** — one row per query (or refresh function) execution: `run_id`,
+  `engine`, `engine_version`, `scale_factor`, `bench_instance_type`, `benchmark`,
+  `namespace`, `query`, `run`, `query_start_time`, `query_end_time`,
+  `result_correct`, `error`, `rows_returned`. For analytical runs each query
+  appears once per repetition (`run` = 0..N-1).
+
+CSV is written via DuckDB so quoting/escaping of free-text fields (e.g. `error`)
+is handled correctly. Load it back for ad-hoc analysis with DuckDB or pandas:
+
+```python
+import duckdb
+duckdb.sql("""
+  SELECT l.engine, l.engine_version, t.query, median(
+           epoch(t.query_end_time::TIMESTAMP) - epoch(t.query_start_time::TIMESTAMP))
+  FROM 'results/logs.csv' l JOIN 'results/time.csv' t USING (run_id)
+  WHERE l.benchmark = 'analytical'
+  GROUP BY ALL
+""").show()
+```
+
 ### Plotting results
 
+`plot_analytical_results.py` plots the **analytical** benchmark: for each engine it
+takes that engine's most recent analytical run and draws per-query latency (median
+with min/max whiskers across the run's repetitions). Plotting for the other
+benchmark types will get their own scripts.
+
 ```bash
-uv run --extra plot python plot_results.py results/duckdb_power_sf10_*.json results/spark_power_sf10_*.json
+uv run --extra plot python plot_analytical_results.py
+uv run --extra plot python plot_analytical_results.py --output analytical.png
 ```
 
 ## Benchmark flags
@@ -175,7 +227,7 @@ uv run --extra plot python plot_results.py results/duckdb_power_sf10_*.json resu
 | `--engine` | `duckdb` or `spark` |
 | `--benchmark` | `load`, `analytical`, `power`, `throughput`, or `composite` |
 | `--sf` | Scale factor (overrides `benchmark.yml`) |
-| `--catalog-config` | Path to catalog config (default: `config/catalog.yml`) |
+| `--catalog-config` | Path to catalog config (default: `config/s3tables_catalog.yml`) |
 | `--namespace` | Namespace name (default: auto-generated) |
 | `--keep-tables` | Skip namespace teardown after run |
 | `--skip-datagen` | Skip data provisioning, use existing namespace (requires `--namespace`; not applicable to `load`) |

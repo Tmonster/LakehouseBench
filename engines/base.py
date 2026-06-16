@@ -14,6 +14,10 @@ class Engine(ABC):
     def __init__(self, catalog: Catalog):
         self.catalog = catalog
 
+    def version(self) -> str:
+        """Engine/runtime version string, recorded with the results."""
+        return "unknown"
+
     @abstractmethod
     def setup(self) -> None:
         """Initialize engine connection/session and attach catalog."""
