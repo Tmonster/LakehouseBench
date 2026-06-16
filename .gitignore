@@ -2,3 +2,9 @@
 **/__pycache__
 results/*.json
 results/*.tsv
+ducklake/
+pyvenv.cfg
+custom-trustore.jks
+lib/*
+pytest.ini
+data/*
