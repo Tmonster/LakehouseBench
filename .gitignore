@@ -8,3 +8,4 @@ custom-trustore.jks
 lib/*
 pytest.ini
 data/*
+queries/tpch/answers/*
