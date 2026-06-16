@@ -210,14 +210,23 @@ duckdb.sql("""
 
 ### Plotting results
 
-`plot_analytical_results.py` plots the **analytical** benchmark: for each engine it
-takes that engine's most recent analytical run and draws per-query latency (median
-with min/max whiskers across the run's repetitions). Plotting for the other
-benchmark types will get their own scripts.
+`plot_results.py` plots the **analytical** benchmark: for each engine it takes that
+engine's most recent analytical run and draws per-query latency (median with min/max
+whiskers across the run's repetitions). Plotting for the other benchmark types will
+get their own scripts.
+
+Use `--sf` and `--instance` to pin the comparison to a single scale factor and
+machine (otherwise "most recent per engine" can mix them — the script warns if the
+selected runs span more than one). `--benchmark` defaults to `analytical`.
 
 ```bash
-uv run --extra plot python plot_analytical_results.py
-uv run --extra plot python plot_analytical_results.py --output analytical.png
+# Latest analytical run per engine, scoped to one SF + machine
+uv run --extra plot python plot_results.py --sf 100 --instance m5.8xlarge
+
+# All runs, latest per engine (warns if scale factors / instances are mixed)
+uv run --extra plot python plot_results.py
+
+uv run --extra plot python plot_results.py --output analytical.png
 ```
 
 ## Benchmark flags
