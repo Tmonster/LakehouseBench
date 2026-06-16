@@ -37,6 +37,11 @@ LOGS_COLUMNS = [
     ("scale_factor", "BIGINT"),
     ("engine", "VARCHAR"),
     ("engine_version", "VARCHAR"),
+    ("table_format", "VARCHAR"),
+    ("catalog_service", "VARCHAR"),
+    ("catalog_region", "VARCHAR"),
+    ("storage_service", "VARCHAR"),
+    ("storage_region", "VARCHAR"),
     ("power_score", "DOUBLE"),
     ("throughput_score", "DOUBLE"),
     ("composite_score", "DOUBLE"),
@@ -122,6 +127,11 @@ def log_row(
     scale_factor: int,
     engine: str,
     engine_version: str,
+    table_format: str | None = None,
+    catalog_service: str | None = None,
+    catalog_region: str | None = None,
+    storage_service: str | None = None,
+    storage_region: str | None = None,
     power_score: float | None = None,
     throughput_score: float | None = None,
     composite_score: float | None = None,
@@ -129,6 +139,7 @@ def log_row(
     return (
         run_id, benchmark_start_time, benchmark_end_time, bench_instance_type,
         benchmark, namespace, scale_factor, engine, engine_version,
+        table_format, catalog_service, catalog_region, storage_service, storage_region,
         power_score, throughput_score, composite_score,
     )
 

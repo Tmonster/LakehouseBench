@@ -1,4 +1,0 @@
-run_id,benchmark_start_time,benchmark_end_time,bench_instance_type,benchmark,namespace,scale_factor,engine,engine_version,power_score,throughput_score,composite_score
-6eb3ed58f0d747d0aa7b398c60a6b979,2026-06-16T10:00:42.514783+00:00,2026-06-16T10:14:52.176336+00:00,c8gd.4xlarge,analytical,bench_sf100,100,duckdb,1.5.3,,,
-7095ae60e95d41f4af03dfbd66b99e68,2026-06-16T10:30:03.422900+00:00,2026-06-16T11:15:23.055031+00:00,c8gd.4xlarge,analytical,bench_sf100,100,spark,4.1.2,,,
-c09aee2af666434c991c7b2d23d9f637,2026-06-16T11:48:52.806123+00:00,2026-06-16T11:59:26.858597+00:00,c8gd.4xlarge,analytical,bench_sf100,100,duckdb,1.5.3,,,

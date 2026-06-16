@@ -1,0 +1,9 @@
+# DuckLake with metadata stored locally and Parquet data stored on S3.
+# DuckDB-only. AWS credentials are resolved via the standard provider chain
+# (env vars, ~/.aws/credentials, or an instance role).
+type: ducklake
+table_format: ducklake
+namespace: benchmarks
+metadata_path: ducklake/tpch.ducklake   # local SQLite metadata catalog
+data_path: s3://my-bucket/ducklake/      # S3 prefix for Parquet data (trailing slash)
+region: eu-central-1

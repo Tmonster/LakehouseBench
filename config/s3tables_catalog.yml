@@ -1,4 +1,5 @@
 type: s3tables
+table_format: iceberg
 region: eu-central-1
 account_id: "840140254803"   # replace with your AWS account ID
 bucket: duckdb-iceberg-benchmarking  # replace with your S3 Tables bucket name

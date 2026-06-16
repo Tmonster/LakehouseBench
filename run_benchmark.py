@@ -214,6 +214,7 @@ def main() -> None:
             power_score=power_score,
             throughput_score=throughput_score,
             composite_score=composite_score,
+            **catalog.catalog_info(),
         )
         record.append_log(result_dir, log)
         if time_rows:

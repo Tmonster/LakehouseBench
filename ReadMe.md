@@ -60,26 +60,42 @@ This is also available as `./setup/mount.sh`.
 Select a catalog with `--catalog-config`. The default is `config/s3tables_catalog.yml`;
 `config/ducklake_local.yml` is the self-contained option for DuckDB (no AWS required).
 
+`table_format` is recorded with the results (`logs.csv`) so runs are comparable by
+format — `iceberg` for the Iceberg catalogs, `ducklake` for DuckLake.
+
 **AWS S3 Tables** (`config/s3tables_catalog.yml`):
 ```yaml
 type: s3tables
+table_format: iceberg
 region: eu-central-1
 account_id: "123456789012"
 bucket: my-s3-tables-bucket
 namespace: benchmarks
 ```
 
-**DuckLake (local, DuckDB only)** (`config/ducklake_local.yml`):
+**DuckLake — local data (DuckDB only)** (`config/ducklake_local.yml`):
 ```yaml
 type: ducklake
+table_format: ducklake
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake
 data_path: ducklake/files
 ```
 
+**DuckLake — data on S3 (DuckDB only)** (`config/ducklake_remote_data.yml`):
+```yaml
+type: ducklake
+table_format: ducklake
+namespace: benchmarks
+metadata_path: ducklake/tpch.ducklake   # metadata stays local (SQLite)
+data_path: s3://my-bucket/ducklake/      # Parquet data on S3 (AWS provider chain)
+region: eu-central-1
+```
+
 **Local PyIceberg (DuckDB only):**
 ```yaml
 type: local
+table_format: iceberg
 namespace: benchmarks
 warehouse_path: warehouse/
 ```
@@ -181,18 +197,30 @@ uv run python run_benchmark.py --engine duckdb --benchmark composite --sf 10 \
 Every benchmark run appends to two append-only CSV files in `results/`. They
 accumulate across runs (nothing is overwritten) and join on `run_id`:
 
-- **`logs.csv`** — one row per run: `run_id`, `benchmark_start_time`,
-  `benchmark_end_time`, `bench_instance_type`, `benchmark`, `namespace`,
-  `scale_factor`, `engine`, `engine_version`, and the headline scores
-  (`power_score`, `throughput_score`, `composite_score`; blank when not applicable).
-  `benchmark_start_time`/`benchmark_end_time` cover only the query phase —
-  provisioning/data-load is excluded (except for the `load` benchmark, where the
-  load *is* the workload).
+- **`logs.csv`** — one row per run. Columns:
+
+  | Column | Notes |
+  |--------|-------|
+  | `run_id` | Joins to `time.csv` |
+  | `benchmark_start_time`, `benchmark_end_time` | Cover only the query phase — provisioning/data-load is excluded (except for the `load` benchmark, where the load *is* the workload) |
+  | `bench_instance_type` | From the `BENCH_INSTANCE_TYPE` env var |
+  | `benchmark` | `load` / `analytical` / `power` / `throughput` / `composite` |
+  | `namespace` | |
+  | `scale_factor` | |
+  | `engine`, `engine_version` | e.g. `duckdb` / `1.5.2` |
+  | `table_format` | `iceberg`, `ducklake` (`delta` eventually) |
+  | `catalog_service` | e.g. `aws-s3tables`, `ducklake`, `sqlite` |
+  | `catalog_region` | Region of the catalog service, or blank if not hosted/regional |
+  | `storage_service` | Where the data lives: `s3`, `gcs`, `azure`, `local` |
+  | `storage_region` | Region of the storage (set for S3), else blank |
+  | `power_score`, `throughput_score`, `composite_score` | Headline scores; blank when not applicable to the benchmark |
+
 - **`time.csv`** — one row per query (or refresh function) execution: `run_id`,
   `engine`, `engine_version`, `scale_factor`, `bench_instance_type`, `benchmark`,
   `namespace`, `query`, `run`, `query_start_time`, `query_end_time`,
   `result_correct`, `error`, `rows_returned`. For analytical runs each query
-  appears once per repetition (`run` = 0..N-1).
+  appears once per repetition (`run` = 0..N-1). Join to `logs.csv` on `run_id`
+  for the catalog/storage/format details.
 
 CSV is written via DuckDB so quoting/escaping of free-text fields (e.g. `error`)
 is handled correctly. Load it back for ad-hoc analysis with DuckDB or pandas:

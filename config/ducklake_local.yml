@@ -1,4 +1,5 @@
 type: ducklake
+table_format: ducklake
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake
 data_path: ducklake/files

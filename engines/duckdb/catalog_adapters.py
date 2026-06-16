@@ -78,12 +78,28 @@ _DUCKLAKE_ALIAS = "ducklake_catalog"
 
 
 def _attach_ducklake(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
+    from catalogs.ducklake import is_remote_data_path
+
     conn.execute("INSTALL ducklake; LOAD ducklake;")
     # turn off external file cache so results are not hot from cache
     # conn.execute("pragma enable_external_file_cache=false")
     metadata_path = props["metadata_path"]
     data_path = props["data_path"]
-    Path(data_path).mkdir(parents=True, exist_ok=True)
+
+    if is_remote_data_path(data_path):
+        # Object-store data path (e.g. s3://): DuckDB needs httpfs + S3 credentials.
+        conn.execute("INSTALL httpfs; LOAD httpfs;")
+        conn.execute("INSTALL aws; LOAD aws;")
+        region_clause = f",\n            REGION '{props['region']}'" if props.get("region") else ""
+        conn.execute(f"""
+            CREATE SECRET IF NOT EXISTS ducklake_s3 (
+                TYPE S3,
+                PROVIDER CREDENTIAL_CHAIN{region_clause}
+            );
+        """)
+    else:
+        Path(data_path).mkdir(parents=True, exist_ok=True)
+
     conn.execute(
         f"ATTACH 'ducklake:{metadata_path}' AS {_DUCKLAKE_ALIAS} (DATA_PATH '{data_path}')"
     )
