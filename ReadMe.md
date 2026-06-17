@@ -174,6 +174,8 @@ uv run python run_benchmark.py --engine duckdb --benchmark load --sf 10
 
 ### Analytical benchmark
 
+> For S3Tables, a number of benchmark results can be skewed due to automatic compaction. For the analytical benchmark, run the Load benchmark first, and wait 10-20 minutes for automatic compaction to trigger.
+
 Runs the 22 TPC-H queries with configurable warmup and benchmark repetitions. No refresh functions.
 
 ```bash
