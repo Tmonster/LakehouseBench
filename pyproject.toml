@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "iceberg-engine-benchmarking"
+name = "lakehouse-bench"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,11 +17,11 @@ dependencies = [
 
 [project.optional-dependencies]
 duckdb = [
-    "iceberg-engine-benchmarking",
+    "lakehouse-bench",
 ]
 spark = [
     "pyspark>=4.0",
-    "iceberg-engine-benchmarking[duckdb]",
+    "lakehouse-bench[duckdb]",
 ]
 local = [
     # Only needed when using the local catalog (writes via PyIceberg instead of DuckDB)
@@ -38,7 +38,7 @@ dev = [
     "ruff>=0.4",
 ]
 all = [
-    "iceberg-engine-benchmarking[duckdb,spark,local]",
+    "lakehouse-bench[duckdb,spark,local]",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -1,6 +1,7 @@
-# Iceberg Engine Benchmarking
+# Lakehouse Benchmarking
 
-TPC-H power and analytical benchmarks for Iceberg table engines (DuckDB and Spark), with support for multiple catalog backends.
+TPC-H benchmarks comparing query engines (DuckDB and Spark) and table formats
+(Iceberg and DuckLake) across multiple catalog and storage backends.
 
 ## Supported engines and catalogs
 
@@ -9,12 +10,16 @@ TPC-H power and analytical benchmarks for Iceberg table engines (DuckDB and Spar
 | DuckDB | ✓ | ✗ | ✓ |
 | Spark  | ✓ | ✗ | ✗ |
 
+`table_format` is `iceberg` for s3tables/local and `ducklake` for DuckLake. DuckLake
+stores its Parquet data either locally (`config/ducklake_local.yml`) or on S3
+(`config/ducklake_remote_data.yml`); its metadata catalog is always a local SQLite file.
+
 ## Prerequisites
 
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv)
 - Java 11+ (Spark only)
-- AWS credentials configured (s3tables only)
+- AWS credentials configured (s3tables, and DuckLake with data on S3)
 
 ## Installation
 
@@ -47,8 +52,8 @@ sudo mkdir -p $HOME/benchmark_mount
 sudo mount /dev/$mount_name $HOME/benchmark_mount
 sudo chown -R ubuntu:ubuntu $HOME/benchmark_mount
 
-git clone https://github.com/Tmonster/IcebergEngineBenchmarking.git $HOME/benchmark_mount/IcebergEngineBenchmarking
-cd $HOME/benchmark_mount/IcebergEngineBenchmarking
+git clone https://github.com/Tmonster/LakehouseBench.git $HOME/benchmark_mount/LakehouseBench
+cd $HOME/benchmark_mount/LakehouseBench
 ```
 
 This is also available as `./setup/mount.sh`.
@@ -112,6 +117,9 @@ result_dir: results/
 ## Data generation
 
 Generate TPC-H base tables for a given scale factor. Data is stored in `data/sf=<N>/`.
+Base tables are generated with [`tpchgen-cli`](https://github.com/clflushopt/tpchgen-rs)
+(a fast Rust generator, installed by `uv sync`); refresh sets and query streams use the
+`dbgen`/`qgen` binaries from the submodule.
 
 ```bash
 # Base tables only
@@ -126,18 +134,35 @@ uv run python -m setup.generate_data --sf 10 --refresh --query-streams
 
 `--query-streams` uses `qgen` to generate a different query permutation and parameter substitution for each stream, matching the TPC-H spec. Without it, the power benchmark falls back to a fixed query order and hardcoded parameters.
 
+### Answers and verification
+
+After the base tables are written, `generate_data` also generates the **expected query
+answers** by querying the just-written Parquet with DuckDB, into
+`queries/tpch/answers/sf<N>/`. The analytical benchmark compares each query's output
+against these (recorded as `result_correct` in `time.csv`). Pass `--no-answers` to skip
+this step, or regenerate answers separately:
+
+```bash
+uv run python -m setup.generate_answers --sf 10
+```
+
+Because answers are derived from the same data the benchmark queries, they stay
+self-consistent on each machine — regenerate them wherever you generate the data
+(generator versions can differ in the random text columns).
+
 ## Running benchmarks
 
 Every run requires the `BENCH_INSTANCE_TYPE` environment variable — it is recorded
-with the results so runs can be attributed to a machine. The benchmark exits
-immediately if it is unset.
+with the results (as `bench_instance_type`) so runs can be attributed to a machine.
+The benchmark exits immediately if it is unset.
 
 ```bash
 export BENCH_INSTANCE_TYPE=m5.4xlarge
 ```
 
-Any additional `BENCH_*` variables you export (e.g. `BENCH_REGION`, `BENCH_DISK`)
-are captured into the results too — see [Results](#results).
+DuckDB's external file cache is disabled for every run, so repeated queries always go
+back to storage rather than serving hot data from cache — keeping comparisons fair
+across catalogs and across the warmup/repeat runs.
 
 ### Load benchmark
 
@@ -238,20 +263,42 @@ duckdb.sql("""
 
 ### Plotting results
 
-`plot_results.py` plots the **analytical** benchmark: for each engine it takes that
-engine's most recent analytical run and draws per-query latency (median with min/max
-whiskers across the run's repetitions). Plotting for the other benchmark types will
-get their own scripts.
+`plot_results.py` plots the **analytical** benchmark. It selects the most recent run
+per `(engine, engine_version, table_format)` — so different engine versions and table
+formats (iceberg / ducklake / delta) each show as separate series — and draws per-query
+latency (median with min/max whiskers across the run's repetitions). Series are ordered
+by engine, then table format, then version, so each engine's bars stay grouped. Plotting
+for the other benchmark types will get their own scripts.
 
-Use `--sf` and `--instance` to pin the comparison to a single scale factor and
-machine (otherwise "most recent per engine" can mix them — the script warns if the
-selected runs span more than one). `--benchmark` defaults to `analytical`.
+Filters (all optional) narrow the runs before selection:
+
+| Flag | Effect |
+|------|--------|
+| `--sf` | One scale factor |
+| `--instance` | One `bench_instance_type` |
+| `--engine` | One engine (e.g. `duckdb`) |
+| `--table-format` | One table format (e.g. `iceberg`, `ducklake`) |
+| `--storage` | `remote`, `local`, or a service (`s3`/`gcs`/`azure`) |
+| `--benchmark` | Benchmark to plot (default: `analytical`) |
+| `--run-ids` | Plot exactly these run_ids — bypasses the latest-per selection and all the filters above |
+| `--results-dir` | Directory holding `logs.csv`/`time.csv` (default: `results`) |
+| `--output` / `-o` | Save path (default: `results/images/tmp/<benchmark>.png`) |
+
+The script warns if the selected runs still span more than one scale factor or instance
+type (pass `--sf` / `--instance` to pin them). It prints the selected runs (label + start
+time) before plotting.
 
 ```bash
-# Latest analytical run per engine, scoped to one SF + machine
-uv run --extra plot python plot_results.py --sf 100 --instance m5.8xlarge
+# iceberg vs ducklake at sf10, one machine, remote storage only
+uv run --extra plot python plot_results.py --sf 10 --instance c8gd.4xlarge --storage remote
 
-# All runs, latest per engine (warns if scale factors / instances are mixed)
+# just one engine / one format
+uv run --extra plot python plot_results.py --sf 10 --engine duckdb --table-format iceberg
+
+# plot exactly two named runs (ignores other filters)
+uv run --extra plot python plot_results.py --run-ids 1a2b3c4d 5e6f7a8b
+
+# all runs, latest per engine/version/format (warns if SF / instance are mixed)
 uv run --extra plot python plot_results.py
 
 uv run --extra plot python plot_results.py --output analytical.png
@@ -265,6 +312,7 @@ uv run --extra plot python plot_results.py --output analytical.png
 | `--benchmark` | `load`, `analytical`, `power`, `throughput`, or `composite` |
 | `--sf` | Scale factor (overrides `benchmark.yml`) |
 | `--catalog-config` | Path to catalog config (default: `config/s3tables_catalog.yml`) |
+| `--benchmark-config` | Path to benchmark config (default: `config/benchmark.yml`) |
 | `--namespace` | Namespace name (default: auto-generated) |
 | `--keep-tables` | Skip namespace teardown after run |
 | `--skip-datagen` | Skip data provisioning, use existing namespace (requires `--namespace`; not applicable to `load`) |
