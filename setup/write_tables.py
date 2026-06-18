@@ -44,8 +44,16 @@ def _write_via_duckdb(catalog: "Catalog", namespace: str, data_dir: Path) -> Non
                     f"Missing {parquet_path}. Run `python -m setup.generate_data` first."
                 )
             conn.execute(f"DROP TABLE IF EXISTS {alias}.{namespace}.{table_name}")
+            # Some catalogs (e.g. Glue) require per-table options such as 'location',
+            # emitted as a WITH (...) clause; most return {} and get a plain CTAS.
+            opts = catalog.table_create_options(table_name, namespace)
+            with_clause = ""
+            if opts:
+                pairs = ", ".join(f"'{k}'='{v}'" for k, v in opts.items())
+                with_clause = f"WITH ({pairs})"
             conn.execute(f"""
                 CREATE TABLE {alias}.{namespace}.{table_name}
+                {with_clause}
                 AS SELECT * FROM read_parquet('{parquet_path}');
             """)
             row_count = conn.execute(

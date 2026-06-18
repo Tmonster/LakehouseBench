@@ -37,6 +37,8 @@ def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
     match catalog_type:
         case "s3tables":
             return _attach_s3tables(conn, props)
+        case "glue":
+            return _attach_glue(conn, props)
         case "local":
             return _attach_local(conn, props)
         case _:
@@ -56,6 +58,26 @@ def _attach_s3tables(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
         ATTACH '{props["s3tables_arn"]}' AS {CATALOG_ALIAS} (
             TYPE ICEBERG,
             ENDPOINT_TYPE S3_TABLES
+        );
+    """)
+    return CATALOG_ALIAS
+
+
+def _attach_glue(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
+    conn.execute("""
+        CREATE SECRET IF NOT EXISTS aws_creds (
+            TYPE S3,
+            PROVIDER CREDENTIAL_CHAIN
+        );
+    """)
+    # Glue does not manage storage: each CREATE TABLE supplies its own 'location'
+    # (see GlueCatalog.table_create_options). purge_requested false leaves data in
+    # place on drop, matching the documented Glue ATTACH usage.
+    conn.execute(f"""
+        ATTACH '{props["account_id"]}' AS {CATALOG_ALIAS} (
+            TYPE ICEBERG,
+            ENDPOINT_TYPE 'GLUE',
+            PURGE_REQUESTED false
         );
     """)
     return CATALOG_ALIAS

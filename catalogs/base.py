@@ -31,6 +31,14 @@ class Catalog(ABC):
     def connection_properties(self) -> dict[str, Any]:
         """Return engine-agnostic properties that catalog adapters translate per-engine."""
 
+    def table_create_options(self, table: str, namespace: str) -> dict[str, str]:
+        """
+        Extra DuckDB CREATE TABLE options, emitted as a WITH (...) clause.
+        Empty for catalogs that manage storage themselves (s3tables, ducklake);
+        Glue overrides this to supply a per-table 'location'.
+        """
+        return {}
+
     def catalog_info(self) -> dict[str, str | None]:
         """
         Catalog + storage location metadata recorded with results (in logs.csv), so

@@ -88,7 +88,11 @@ def main() -> None:
         catalog.provision(namespace=namespace, data_dir=data_dir)
 
     print(f"\nRunning {args.benchmark} benchmark with {args.engine}...")
-    engine.setup()
+    # The load benchmark provisions via the catalog (its own connection) and never uses
+    # the engine object. Skipping setup avoids a second attach of DuckLake's local
+    # metadata file, which DuckDB rejects as a file-handle conflict.
+    if args.benchmark != "load":
+        engine.setup()
     run_id = uuid.uuid4().hex
     instance = record.bench_instance_type()
     engine_version = engine.version()
