@@ -1,0 +1,12 @@
+type: glue
+table_format: iceberg
+# Plot series label; distinguishes configs sharing a catalog type. Defaults to the type.
+catalog_name: glue_target_file_size_bytes_500mb
+region: eu-central-1
+account_id: "840140254803"                    # Glue catalog id (the ATTACH target)
+namespace: lakehouse_benchmarking             # = Glue database name
+# Each TPC-H table gets its own dir beneath this: <base_location>/<namespace>/<table>/
+base_location: s3://tom-playground-labs/LakehouseBench/duckdb-iceberg-glue
+# Iceberg table properties applied on CREATE TABLE (emitted as WITH (...)).
+table_properties:
+  target-file-size-bytes: 524288000           # 500 MiB (500 * 1024 * 1024)
