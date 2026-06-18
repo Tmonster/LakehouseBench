@@ -34,10 +34,14 @@ class Catalog(ABC):
     def table_create_options(self, table: str, namespace: str) -> dict[str, str]:
         """
         Extra DuckDB CREATE TABLE options, emitted as a WITH (...) clause.
-        Empty for catalogs that manage storage themselves (s3tables, ducklake);
-        Glue overrides this to supply a per-table 'location'.
+
+        Defaults to the `table_properties` map from the catalog config — use this to
+        set Iceberg table properties (e.g. 'target-file-size-bytes') on the catalogs
+        written through DuckDB's Iceberg extension (s3tables, glue). Glue extends this
+        to also supply a per-table 'location'. Only set it on Iceberg catalogs; it is
+        passed through verbatim to CREATE TABLE.
         """
-        return {}
+        return {str(k): str(v) for k, v in self.config.extra.get("table_properties", {}).items()}
 
     def catalog_info(self) -> dict[str, str | None]:
         """
@@ -46,7 +50,11 @@ class Catalog(ABC):
 
         Keys:
           table_format     — table format of the data: iceberg, ducklake, delta
-          catalog_service  — e.g. aws-s3tables, aws-glue, ducklake, polaris
+          catalog_service  — the catalog kind: aws-s3tables, aws-glue, ducklake, polaris
+          catalog_name     — user-facing label for this catalog config (plot series key);
+                             set `catalog_name` in the config to distinguish two configs
+                             that hit the same catalog_service but differ (e.g. table
+                             properties). Defaults to catalog_service when unset.
           catalog_region   — region of the catalog service, or None if not hosted/regional
           storage_service  — where the data lives: s3, gcs, azure, local
           storage_region   — region of the storage (set for AWS/s3), else None
@@ -54,6 +62,7 @@ class Catalog(ABC):
         return {
             "table_format": None,
             "catalog_service": None,
+            "catalog_name": None,
             "catalog_region": None,
             "storage_service": None,
             "storage_region": None,

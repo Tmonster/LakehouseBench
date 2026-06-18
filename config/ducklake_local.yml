@@ -1,5 +1,7 @@
 type: ducklake
 table_format: ducklake
+# Plot series label; distinguishes configs sharing a catalog type. Defaults to the type.
+catalog_name: ducklake-local
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake
 data_path: ducklake/files

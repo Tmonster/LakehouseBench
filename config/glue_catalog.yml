@@ -1,5 +1,7 @@
 type: glue
 table_format: iceberg
+# Plot series label; distinguishes configs sharing a catalog type. Defaults to the type.
+catalog_name: aws-glue
 region: eu-central-1
 account_id: "840140254803"                    # Glue catalog id (the ATTACH target)
 namespace: lakehouse_benchmarking             # = Glue database name

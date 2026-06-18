@@ -3,6 +3,8 @@
 # (env vars, ~/.aws/credentials, or an instance role).
 type: ducklake
 table_format: ducklake
+# Plot series label; distinguishes configs sharing a catalog type. Defaults to the type.
+catalog_name: ducklake-remote
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake   # local SQLite metadata catalog
 data_path: s3://tom-playground-labs/LakehouseBench/ducklake/      # S3 prefix for Parquet data (trailing slash)

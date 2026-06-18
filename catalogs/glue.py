@@ -60,12 +60,17 @@ class GlueCatalog(Catalog):
         return f"{ns}.{table}"
 
     def table_create_options(self, table: str, namespace: str) -> dict[str, str]:
-        return {"location": f"{self.base_location}/{namespace}/{table}/"}
+        # Config-driven Iceberg table properties (from base) plus Glue's required location.
+        opts = super().table_create_options(table, namespace)
+        opts["location"] = f"{self.base_location}/{namespace}/{table}/"
+        return opts
 
     def catalog_info(self) -> dict[str, str | None]:
+        service = "aws-glue"
         return {
             "table_format": self.config.extra.get("table_format", "iceberg"),
-            "catalog_service": "aws-glue",
+            "catalog_service": service,
+            "catalog_name": self.config.extra.get("catalog_name", service),
             "catalog_region": self.region,
             "storage_service": "s3",
             "storage_region": self.region,

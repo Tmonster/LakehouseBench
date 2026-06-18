@@ -1,5 +1,7 @@
 type: s3tables
 table_format: iceberg
+# Plot series label; distinguishes configs sharing a catalog type. Defaults to the type.
+catalog_name: aws-s3tables
 region: eu-central-1
 account_id: "840140254803"   # replace with your AWS account ID
 bucket: duckdb-iceberg-benchmarking  # replace with your S3 Tables bucket name

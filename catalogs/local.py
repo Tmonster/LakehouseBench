@@ -47,9 +47,11 @@ class LocalCatalog(Catalog):
         return str((self.warehouse_path / ns / table).absolute())
 
     def catalog_info(self) -> dict[str, str | None]:
+        service = "sqlite"   # PyIceberg SqlCatalog
         return {
             "table_format": self.config.extra.get("table_format", "iceberg"),
-            "catalog_service": "sqlite",   # PyIceberg SqlCatalog
+            "catalog_service": service,
+            "catalog_name": self.config.extra.get("catalog_name", service),
             "catalog_region": None,
             "storage_service": "local",
             "storage_region": None,

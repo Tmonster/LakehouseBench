@@ -87,9 +87,11 @@ class DuckLakeCatalog(Catalog):
 
     def catalog_info(self) -> dict[str, str | None]:
         storage = _storage_service(self.data_path)
+        service = "ducklake"
         return {
             "table_format": self.config.extra.get("table_format", "ducklake"),
-            "catalog_service": "ducklake",
+            "catalog_service": service,
+            "catalog_name": self.config.extra.get("catalog_name", service),
             "catalog_region": None,        # metadata is a local SQLite file, not a hosted service
             "storage_service": storage,
             "storage_region": self.region if storage == "s3" else None,

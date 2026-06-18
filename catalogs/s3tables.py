@@ -56,9 +56,11 @@ class S3TablesCatalog(Catalog):
         return f"{ns}.{table}"
 
     def catalog_info(self) -> dict[str, str | None]:
+        service = "aws-s3tables"
         return {
             "table_format": self.config.extra.get("table_format", "iceberg"),
-            "catalog_service": "aws-s3tables",
+            "catalog_service": service,
+            "catalog_name": self.config.extra.get("catalog_name", service),
             "catalog_region": self.region,
             "storage_service": "s3",       # S3 Tables stores data in S3
             "storage_region": self.region,
