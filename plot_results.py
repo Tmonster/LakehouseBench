@@ -48,8 +48,8 @@ def ensure_catalog_name(logs: pd.DataFrame) -> pd.DataFrame:
 
 def select_latest_runs(
     logs: pd.DataFrame, benchmark: str, sf: int, instance: str,
-    storage: str | None, engines: list[str] | None, table_format: str | None,
-    catalog: str | None,
+    storage: str | None, engines: list[str] | None, engine_versions: list[str] | None,
+    table_format: str | None, catalogs: list[str] | None,
 ) -> pd.DataFrame:
     """
     One row per (engine, engine_version, catalog_name, table_format): the most recent
@@ -64,10 +64,13 @@ def select_latest_runs(
     sel = sel[sel["bench_instance_type"] == instance]
     if engines is not None:
         sel = sel[sel["engine"].isin(engines)]
+    if engine_versions is not None:
+        # Versions come from the CLI as strings; match against stringified column values.
+        sel = sel[sel["engine_version"].astype(str).isin([str(v) for v in engine_versions])]
     if table_format is not None:
         sel = sel[sel["table_format"] == table_format]
-    if catalog is not None:
-        sel = sel[sel["catalog_name"] == catalog]
+    if catalogs is not None:
+        sel = sel[sel["catalog_name"].isin(catalogs)]
     if storage is not None:
         if storage == "remote":
             sel = sel[sel["storage_service"] != "local"]
@@ -105,8 +108,8 @@ def select_run_ids(logs: pd.DataFrame, run_ids: list[str]) -> pd.DataFrame:
 
 def load(
     results_dir: Path, benchmark: str, sf: int, instance: str,
-    storage: str | None, engines: list[str] | None, table_format: str | None,
-    catalog: str | None, run_ids: list[str] | None,
+    storage: str | None, engines: list[str] | None, engine_versions: list[str] | None,
+    table_format: str | None, catalogs: list[str] | None, run_ids: list[str] | None,
 ) -> pd.DataFrame:
     logs_path = results_dir / "logs.csv"
     time_path = results_dir / "time.csv"
@@ -117,7 +120,7 @@ def load(
 
     logs = ensure_catalog_name(pd.read_csv(logs_path))
     # Explicit --run-ids take precedence over the latest-per-engine/format selection.
-    runs = select_run_ids(logs, run_ids) if run_ids else select_latest_runs(logs, benchmark, sf, instance, storage, engines, table_format, catalog)
+    runs = select_run_ids(logs, run_ids) if run_ids else select_latest_runs(logs, benchmark, sf, instance, storage, engines, engine_versions, table_format, catalogs)
     if runs.empty:
         return runs
 
@@ -153,7 +156,9 @@ def plot(df: pd.DataFrame, benchmark: str, output: Path | None) -> None:
     sns.set_theme(style="whitegrid", font_scale=0.9)
     palette = sns.color_palette("tab10", n_colors=len(labels))
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    # Widen with the number of query groups so bars aren't squeezed (TPC-H has ~22).
+    fig_width = max(14, len(queries) * 0.7)
+    fig, ax = plt.subplots(figsize=(fig_width, 6))
     sns.barplot(
         data=df,
         x="query",
@@ -174,12 +179,16 @@ def plot(df: pd.DataFrame, benchmark: str, output: Path | None) -> None:
                  f"(most recent run per engine/version/catalog/format, median, min/max across runs)")
     ax.set_xlabel("Query")
     ax.set_ylabel("Elapsed (s)")
-    ax.legend(title="Engine version + catalog + format", bbox_to_anchor=(1.01, 1), loc="upper left")
-    fig.tight_layout(rect=[0, 0, 0.82, 1])
+    # Legend beneath the plot, spread across columns, so the axes use the full width.
+    ax.legend(title="Engine version + catalog + format",
+              loc="upper center", bbox_to_anchor=(0.5, -0.12),
+              ncol=min(len(labels), 4))
+    fig.tight_layout()
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(output, dpi=150)
+        # bbox_inches="tight" keeps the below-axes legend from being clipped.
+        fig.savefig(output, dpi=150, bbox_inches="tight")
         print(f"Saved to {output}")
     else:
         plt.show()
@@ -197,10 +206,12 @@ def main() -> None:
                         help="bench_instance_type (required unless --run-ids is given)")
     parser.add_argument("--engine", nargs="+", default=None,
                         help="Filter to these engine(s), e.g. --engine duckdb spark")
+    parser.add_argument("--engine-version", nargs="+", default=None,
+                        help="Filter to these engine version(s), e.g. --engine-version 1.5.2 1.5.3")
     parser.add_argument("--table-format", default=None, help="Filter to one table format (e.g. iceberg, ducklake)")
-    parser.add_argument("--catalog", default=None,
-                        help="Filter to one catalog_name (the config's catalog_name, "
-                             "defaulting to its type, e.g. aws-glue / aws-s3tables / a custom label)")
+    parser.add_argument("--catalog", nargs="+", default=None,
+                        help="Filter to these catalog_name(s) — the config's catalog_name, "
+                             "defaulting to its type. e.g. --catalog aws-glue glue_target_file_size_bytes_500mb")
     parser.add_argument("--storage", default=None,
                         help="Filter by storage: 'remote', 'local', or a service (s3/gcs/azure)")
     parser.add_argument("--run-ids", nargs="+", default=None,
@@ -217,15 +228,18 @@ def main() -> None:
             parser.error(f"the following arguments are required: {', '.join(missing)} (or use --run-ids)")
 
     df = load(args.results_dir, args.benchmark, args.sf, args.instance, args.storage,
-              args.engine, args.table_format, args.catalog, args.run_ids)
+              args.engine, args.engine_version, args.table_format, args.catalog, args.run_ids)
     if df.empty:
         print(f"No {args.benchmark} results found for the given filters.", file=sys.stderr)
         sys.exit(1)
 
     print("Plotting runs:")
-    for label, started in (df[["label", "benchmark_start_time"]].drop_duplicates()
-                            .sort_values("label").itertuples(index=False)):
-        print(f"  {label}: started {started}")
+    runs_info = (df[["label", "run_id", "benchmark_start_time"]]
+                 .drop_duplicates().sort_values("label"))
+    for label, run_id, started in runs_info.itertuples(index=False):
+        print(f"  {run_id}  {label}  (started {started})")
+    # Copy-pasteable: pin this exact set of runs regardless of future data.
+    print(f"\nReplot exactly these runs:\n  --run-ids {' '.join(runs_info['run_id'].tolist())}")
 
     output = args.output or (DEFAULT_OUTPUT_DIR / f"{args.benchmark}.png")
     plot(df, args.benchmark, output)
