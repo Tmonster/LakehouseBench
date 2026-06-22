@@ -5,21 +5,24 @@ TPC-H benchmarks comparing query engines (DuckDB and Spark) and table formats
 
 ## Supported engines and catalogs
 
-| Engine | s3tables | local (PyIceberg) | DuckLake |
-|--------|----------|-------------------|----------|
-| DuckDB | ✓ | ✗ | ✓ |
-| Spark  | ✓ | ✗ | ✗ |
+| Engine | s3tables | Glue | local (PyIceberg) | DuckLake |
+|--------|----------|------|-------------------|----------|
+| DuckDB | ✓ | ✓ | ✗ | ✓ |
+| Spark  | ✓ | ✗ | ✗ | ✗ |
 
-`table_format` is `iceberg` for s3tables/local and `ducklake` for DuckLake. DuckLake
+`table_format` is `iceberg` for s3tables/Glue/local and `ducklake` for DuckLake. DuckLake
 stores its Parquet data either locally (`config/ducklake_local.yml`) or on S3
 (`config/ducklake_remote_data.yml`); its metadata catalog is always a local SQLite file.
+
+Unlike S3 Tables, AWS Glue does not manage table storage, so each table is created with an
+explicit `location` derived from a `base_location` prefix in the config (see below).
 
 ## Prerequisites
 
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv)
 - Java 11+ (Spark only)
-- AWS credentials configured (s3tables, and DuckLake with data on S3)
+- AWS credentials configured (s3tables, Glue, and DuckLake with data on S3)
 
 ## Installation
 
@@ -63,25 +66,56 @@ This is also available as `./setup/mount.sh`.
 ### Catalog
 
 Select a catalog with `--catalog-config`. The default is `config/s3tables_catalog.yml`;
-`config/ducklake_local.yml` is the self-contained option for DuckDB (no AWS required).
+`config/ducklake_local.yml` is the self-contained option for DuckDB & DuckLake (no AWS required).
 
 `table_format` is recorded with the results (`logs.csv`) so runs are comparable by
 format — `iceberg` for the Iceberg catalogs, `ducklake` for DuckLake.
+
+Two optional keys are accepted by every catalog config:
+
+- **`catalog_name`** — a user-facing label recorded with the results and used as the plot
+  series key. Defaults to the catalog type (`aws-s3tables`, `aws-glue`, `ducklake`, …).
+  Give two configs that hit the *same* catalog distinct `catalog_name`s (e.g. different
+  `table_properties`) to compare them side by side in `plot_results.py`. This can be used
+  to distinguish between two of the same catalogs with different table properties
+- **`table_properties`** — a map of Iceberg table properties applied on `CREATE TABLE`
+  (emitted as a `WITH (...)` clause). Works for any Iceberg catalog written through DuckDB
+  (s3tables, Glue). Example: `write.target-file-size-bytes: 134217728`.
 
 **AWS S3 Tables** (`config/s3tables_catalog.yml`):
 ```yaml
 type: s3tables
 table_format: iceberg
+catalog_name: aws-s3tables                  # optional; plot label, defaults to the type
 region: eu-central-1
 account_id: "123456789012"
 bucket: my-s3-tables-bucket
 namespace: benchmarks
 ```
 
+**AWS Glue (DuckDB only)** (`config/glue_catalog.yml`):
+```yaml
+type: glue
+table_format: iceberg
+catalog_name: aws-glue                     # optional; plot label, defaults to the type
+region: eu-central-1
+account_id: "123456789012"                 # Glue catalog id (the ATTACH target)
+namespace: my_glue_database                # = Glue database name
+base_location: s3://my-bucket/iceberg/     # each table -> <base_location>/<namespace>/<table>/
+table_properties:                          # optional Iceberg table properties
+  write.target-file-size-bytes: 134217728
+```
+
+DuckDB attaches Glue with `ENDPOINT_TYPE 'GLUE'`. Because Glue does not manage storage,
+every table is created with an explicit `location` beneath `base_location` (Iceberg tables
+cannot share a location). To compare table-property variants, copy this config, change
+`catalog_name`, and adjust `table_properties` — see `config/glue_target_file_size_500mb.yml`.
+
 **DuckLake — local data (DuckDB only)** (`config/ducklake_local.yml`):
 ```yaml
 type: ducklake
 table_format: ducklake
+catalog_name: ducklake-local            # optional; plot label, defaults to the type
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake
 data_path: ducklake/files
@@ -91,6 +125,7 @@ data_path: ducklake/files
 ```yaml
 type: ducklake
 table_format: ducklake
+catalog_name: ducklake-remote           # optional; plot label, defaults to the type
 namespace: benchmarks
 metadata_path: ducklake/tpch.ducklake   # metadata stays local (SQLite)
 data_path: s3://my-bucket/ducklake/      # Parquet data on S3 (AWS provider chain)
@@ -101,6 +136,7 @@ region: eu-central-1
 ```yaml
 type: local
 table_format: iceberg
+catalog_name: local-pyiceberg           # optional; plot label, defaults to the type
 namespace: benchmarks
 warehouse_path: warehouse/
 ```
@@ -174,7 +210,7 @@ uv run python run_benchmark.py --engine duckdb --benchmark load --sf 10
 
 ### Analytical benchmark
 
-> For S3Tables, a number of benchmark results can be skewed due to automatic compaction. For the analytical benchmark, run the Load benchmark first, and wait 10-20 minutes for automatic compaction to trigger.
+> For S3Tables, a number of benchmark results can be skewed due to automatic compaction. For the analytical benchmark, run the Load benchmark first, and wait 10-20 minutes for automatic compaction to trigger. There is currently no way to disable compaction schema-wide in S3Tables
 
 Runs the 22 TPC-H queries with configurable warmup and benchmark repetitions. No refresh functions.
 
@@ -236,7 +272,8 @@ accumulate across runs (nothing is overwritten) and join on `run_id`:
   | `scale_factor` | |
   | `engine`, `engine_version` | e.g. `duckdb` / `1.5.2` |
   | `table_format` | `iceberg`, `ducklake` (`delta` eventually) |
-  | `catalog_service` | e.g. `aws-s3tables`, `ducklake`, `sqlite` |
+  | `catalog_service` | The catalog kind: e.g. `aws-s3tables`, `aws-glue`, `ducklake`, `sqlite` |
+  | `catalog_name` | The config's `catalog_name` label (defaults to `catalog_service`); the plot series key |
   | `catalog_region` | Region of the catalog service, or blank if not hosted/regional |
   | `storage_service` | Where the data lives: `s3`, `gcs`, `azure`, `local` |
   | `storage_region` | Region of the storage (set for S3), else blank |
@@ -265,20 +302,31 @@ duckdb.sql("""
 
 ### Plotting results
 
-`plot_results.py` plots the **analytical** benchmark. It selects the most recent run
-per `(engine, engine_version, table_format)` — so different engine versions and table
-formats (iceberg / ducklake / delta) each show as separate series — and draws per-query
-latency (median with min/max whiskers across the run's repetitions). Series are ordered
-by engine, then table format, then version, so each engine's bars stay grouped. Plotting
-for the other benchmark types will get their own scripts.
+Two plotting scripts read `results/` (install the extras with `uv sync --extra plot`):
+`plot_results.py` for **per-query latency** (analytical benchmark), and `plot_scores.py`
+for the headline **scores** (power / throughput / composite).
 
-Filters (all optional) narrow the runs before selection:
+#### Per-query latency (`plot_results.py`)
+
+`plot_results.py` plots the **analytical** benchmark. It selects the most recent run
+per `(engine, engine_version, catalog_name, table_format)` — so different engine versions,
+catalogs, and table formats each show as separate series — and draws per-query latency
+(median with min/max whiskers across the run's repetitions). Because the series key is
+`catalog_name` (not `catalog_service`), two configs that hit the same remote catalog with
+different `table_properties` plot side by side. Series are ordered by engine, then catalog,
+then table format, then version. Plotting for the other benchmark types will get their own
+scripts.
+
+`--sf` and `--instance` are **required** (one scale factor + instance type per plot),
+unless `--run-ids` is used. The other filters narrow the runs before selection:
 
 | Flag | Effect |
 |------|--------|
-| `--sf` | One scale factor |
-| `--instance` | One `bench_instance_type` |
-| `--engine` | One engine (e.g. `duckdb`) |
+| `--sf` | Scale factor (required unless `--run-ids`) |
+| `--instance` | `bench_instance_type` (required unless `--run-ids`) |
+| `--engine` | One or more engines (e.g. `--engine duckdb spark`) |
+| `--engine-version` | One or more versions (e.g. `--engine-version 1.5.2 1.5.3`) |
+| `--catalog` | One or more `catalog_name`s (e.g. `--catalog aws-glue glue_target_file_size_bytes_500mb`) |
 | `--table-format` | One table format (e.g. `iceberg`, `ducklake`) |
 | `--storage` | `remote`, `local`, or a service (`s3`/`gcs`/`azure`) |
 | `--benchmark` | Benchmark to plot (default: `analytical`) |
@@ -286,24 +334,64 @@ Filters (all optional) narrow the runs before selection:
 | `--results-dir` | Directory holding `logs.csv`/`time.csv` (default: `results`) |
 | `--output` / `-o` | Save path (default: `results/images/tmp/<benchmark>.png`) |
 
-The script warns if the selected runs still span more than one scale factor or instance
-type (pass `--sf` / `--instance` to pin them). It prints the selected runs (label + start
-time) before plotting.
+Before plotting it prints the selected runs — each as `run_id  label  (started …)` — plus a
+copy-pasteable `--run-ids …` line, so once your filters give the right set you can pin that
+exact combination.
 
 ```bash
 # iceberg vs ducklake at sf10, one machine, remote storage only
 uv run --extra plot python plot_results.py --sf 10 --instance c8gd.4xlarge --storage remote
 
-# just one engine / one format
-uv run --extra plot python plot_results.py --sf 10 --engine duckdb --table-format iceberg
+# compare two Glue table-property variants
+uv run --extra plot python plot_results.py --sf 10 --instance c8gd.4xlarge \
+    --catalog aws-glue glue_target_file_size_bytes_500mb
 
-# plot exactly two named runs (ignores other filters)
+# just DuckDB, one format, two versions
+uv run --extra plot python plot_results.py --sf 10 --instance c8gd.4xlarge \
+    --engine duckdb --table-format iceberg --engine-version 1.5.3 1.5.4
+
+# plot exactly these runs (ignores other filters; --sf/--instance not needed)
 uv run --extra plot python plot_results.py --run-ids 1a2b3c4d 5e6f7a8b
 
-# all runs, latest per engine/version/format (warns if SF / instance are mixed)
-uv run --extra plot python plot_results.py
+uv run --extra plot python plot_results.py --sf 10 --instance c8gd.4xlarge -o analytical.png
+```
 
-uv run --extra plot python plot_results.py --output analytical.png
+#### Scores (`plot_scores.py`)
+
+`plot_scores.py` plots the headline **scores** (`power_score`, `throughput_score`,
+`composite_score`) straight from `logs.csv` — no `time.csv` needed. Bars are grouped by
+score type, one bar per `(engine, engine_version, table_format)` series; higher is better
+(QphH). For each metric it picks the most recent run that *has* that score, so a single
+series may source `power` and `throughput` from different runs (e.g. a `power` run and a
+`throughput` run). Series are ordered by engine, then table format, then version.
+
+> Unlike `plot_results.py`, this script does not yet key on `catalog_name` and its filters
+> are single-valued (and `--sf`/`--instance` are optional). Two configs hitting the same
+> catalog with different `table_properties` will collapse to one series here.
+
+| Flag | Effect |
+|------|--------|
+| `--metric` | One of `power` / `throughput` / `composite` (default: all three) |
+| `--sf` | Filter to one scale factor |
+| `--instance` | Filter to one `bench_instance_type` |
+| `--engine` | Filter to one engine (e.g. `duckdb`) |
+| `--table-format` | One table format (e.g. `iceberg`, `ducklake`) |
+| `--storage` | `remote`, `local`, or a service (`s3`/`gcs`/`azure`) |
+| `--run-ids` | Use exactly these run_ids — bypasses the latest-per selection and the filters above |
+| `--results-dir` | Directory holding `logs.csv` (default: `results`) |
+| `--output` / `-o` | Save path (default: `results/images/tmp/scores.png`) |
+
+It prints each plotted score (`metric  label: score  (run_id, started …)`) before drawing.
+
+```bash
+# all three scores at sf10
+uv run --extra plot python plot_scores.py --sf 10
+
+# just the composite score, one engine
+uv run --extra plot python plot_scores.py --sf 10 --engine duckdb --metric composite
+
+# exactly these runs
+uv run --extra plot python plot_scores.py --run-ids 1a2b3c4d 5e6f7a8b
 ```
 
 ## Benchmark flags
