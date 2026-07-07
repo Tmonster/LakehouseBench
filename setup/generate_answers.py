@@ -53,7 +53,10 @@ def generate_answers(scale_factor: int, data_dir: Path) -> None:
         # Load base tables so the queries resolve against this data.
         for table in TPCH_TABLES:
             src = data_dir / f"{table}.parquet"
-            conn.execute(f"CREATE TABLE {table} AS SELECT * FROM '{src}'")
+            conn.execute(
+                f"CREATE TABLE {table} AS "
+                f"SELECT * FROM read_parquet('{src}', hive_partitioning=false)"
+            )
 
         # Generate answers from the exact queries the benchmark runs, so the two
         # always stay in sync (e.g. when text columns are dropped to make results

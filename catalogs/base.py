@@ -16,12 +16,12 @@ class Catalog(ABC):
         self.config = config
 
     @abstractmethod
-    def provision(self, namespace: str, data_dir: Path) -> None:
-        """Create namespace and write TPC-H Iceberg tables from data_dir Parquet files."""
+    def provision(self, namespace: str, data_dir: Path, tables: list[str]) -> None:
+        """Create namespace and write the suite's tables from data_dir Parquet files."""
 
     @abstractmethod
-    def teardown(self, namespace: str) -> None:
-        """Drop namespace and all tables within it."""
+    def teardown(self, namespace: str, tables: list[str]) -> None:
+        """Drop the given tables and their namespace."""
 
     @abstractmethod
     def table_ref(self, table: str, namespace: str | None = None) -> str:

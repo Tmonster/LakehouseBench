@@ -19,8 +19,13 @@ class Engine(ABC):
         return "unknown"
 
     @abstractmethod
-    def setup(self) -> None:
-        """Initialize engine connection/session and attach catalog."""
+    def setup(self, tables: list[str]) -> None:
+        """
+        Initialize engine connection/session and attach catalog.
+
+        `tables` is the active suite's table list — used by engines that must
+        materialize per-table views (e.g. DuckDB over a local Iceberg catalog).
+        """
 
     @abstractmethod
     def run_query(self, sql: str, namespace: str) -> tuple[list[tuple], list[str], int]:

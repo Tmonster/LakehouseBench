@@ -1,5 +1,5 @@
 """
-Write TPC-H Parquet files into an Iceberg catalog.
+Write a benchmark suite's Parquet files into an Iceberg catalog.
 Called by Catalog.provision() — not intended to be run directly.
 
 S3 Tables: uses DuckDB ATTACH + CREATE TABLE AS SELECT via read_parquet().
@@ -17,27 +17,22 @@ from engines.duckdb.catalog_adapters import attach_catalog
 if TYPE_CHECKING:
     from catalogs.base import Catalog
 
-TPCH_TABLES = [
-    "customer", "lineitem", "nation", "orders",
-    "part", "partsupp", "region", "supplier",
-]
 
-
-def write_tpch_tables(catalog: "Catalog", namespace: str, data_dir: Path) -> None:
+def write_tables(catalog: "Catalog", namespace: str, data_dir: Path, tables: list[str]) -> None:
     props = catalog.connection_properties()
     if props["type"] == "local":
-        _write_via_pyiceberg(props, namespace, data_dir)
+        _write_via_pyiceberg(props, namespace, data_dir, tables)
     else:
         # s3tables and ducklake both use DuckDB ATTACH for writes
-        _write_via_duckdb(catalog, namespace, data_dir)
+        _write_via_duckdb(catalog, namespace, data_dir, tables)
 
 
 
-def _write_via_duckdb(catalog: "Catalog", namespace: str, data_dir: Path) -> None:
+def _write_via_duckdb(catalog: "Catalog", namespace: str, data_dir: Path, tables: list[str]) -> None:
     with duckdb.connect() as conn:
         alias = attach_catalog(conn, catalog)
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {alias}.{namespace}")
-        for table_name in TPCH_TABLES:
+        for table_name in tables:
             parquet_path = (data_dir / f"{table_name}.parquet").absolute()
             if not parquet_path.exists():
                 raise FileNotFoundError(
@@ -54,7 +49,7 @@ def _write_via_duckdb(catalog: "Catalog", namespace: str, data_dir: Path) -> Non
             conn.execute(f"""
                 CREATE TABLE {alias}.{namespace}.{table_name}
                 {with_clause}
-                AS SELECT * FROM read_parquet('{parquet_path}');
+                AS SELECT * FROM read_parquet('{parquet_path}', hive_partitioning=false);
             """)
             row_count = conn.execute(
                 f"SELECT count(*) FROM {alias}.{namespace}.{table_name}"
@@ -62,7 +57,7 @@ def _write_via_duckdb(catalog: "Catalog", namespace: str, data_dir: Path) -> Non
             print(f"  {namespace}.{table_name}: {row_count:,} rows written")
 
 
-def _write_via_pyiceberg(props: dict, namespace: str, data_dir: Path) -> None:
+def _write_via_pyiceberg(props: dict, namespace: str, data_dir: Path, tables: list[str]) -> None:
     import pyarrow.parquet as pq
     from pyiceberg.catalog.sql import SqlCatalog
 
@@ -73,7 +68,7 @@ def _write_via_pyiceberg(props: dict, namespace: str, data_dir: Path) -> None:
             "warehouse": f"file://{props['warehouse_path']}",
         },
     )
-    for table_name in TPCH_TABLES:
+    for table_name in tables:
         parquet_path = data_dir / f"{table_name}.parquet"
         if not parquet_path.exists():
             raise FileNotFoundError(

@@ -21,14 +21,26 @@ from catalogs import load_catalog
 from engines import load_engine
 from benchmarks import record
 from benchmarks.runner import BenchmarkRunner
+from benchmarks.suite import get_suite
 
 BENCHMARK_CHOICES = ["load", "analytical", "power", "throughput", "composite"]
+SUITE_CHOICES = ["tpch", "tpcds"]
+
+# Benchmarks each suite supports. TPC-DS currently supports only load + analytical
+# (data-maintenance and compaction land in later phases); the TPC-H power/throughput/
+# composite tests depend on the TPC-H refresh model and are not defined for TPC-DS.
+SUITE_BENCHMARKS = {
+    "tpch": set(BENCHMARK_CHOICES),
+    "tpcds": {"load", "analytical"},
+}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--engine", required=True, choices=["duckdb", "spark", "athena"])
     parser.add_argument("--benchmark", required=True, choices=BENCHMARK_CHOICES)
+    parser.add_argument("--suite", default="tpch", choices=SUITE_CHOICES,
+                        help="Benchmark suite (default: tpch)")
     parser.add_argument("--sf", type=int, default=None, help="Override scale factor from config")
     parser.add_argument("--catalog-config", default="config/s3tables_catalog.yml")
     parser.add_argument("--benchmark-config", default="config/benchmark.yml")
@@ -55,12 +67,21 @@ def main() -> None:
     if args.benchmark == "load" and args.skip_datagen:
         parser.error("--skip-datagen is not applicable to the load benchmark")
 
+    suite = get_suite(args.suite)
+    if args.benchmark not in SUITE_BENCHMARKS[suite.name]:
+        supported = ", ".join(sorted(SUITE_BENCHMARKS[suite.name]))
+        parser.error(
+            f"'{args.benchmark}' is not supported for the {suite.name} suite "
+            f"(supported: {supported})"
+        )
+
     catalog_cfg = yaml.safe_load(Path(args.catalog_config).read_text())
     bench_cfg = yaml.safe_load(Path(args.benchmark_config).read_text())
 
     scale_factor = args.sf or bench_cfg["scale_factor"]
     namespace = args.namespace or f"bench_{uuid.uuid4().hex[:8]}"
-    data_dir = Path("data") / f"sf={scale_factor}"
+    data_dir = suite.data_dir(scale_factor)
+    tables = list(suite.tables)
     result_dir = Path(bench_cfg["result_dir"])
 
     catalog = load_catalog(catalog_cfg)
@@ -85,14 +106,14 @@ def main() -> None:
     # All other benchmarks provision first (unless --skip-datagen).
     if args.benchmark != "load" and not args.skip_datagen:
         print(f"Provisioning namespace '{namespace}'...")
-        catalog.provision(namespace=namespace, data_dir=data_dir)
+        catalog.provision(namespace=namespace, data_dir=data_dir, tables=tables)
 
     print(f"\nRunning {args.benchmark} benchmark with {args.engine}...")
     # The load benchmark provisions via the catalog (its own connection) and never uses
     # the engine object. Skipping setup avoids a second attach of DuckLake's local
     # metadata file, which DuckDB rejects as a file-handle conflict.
     if args.benchmark != "load":
-        engine.setup()
+        engine.setup(tables)
     run_id = uuid.uuid4().hex
     instance = record.bench_instance_type()
     engine_version = engine.version()
@@ -126,6 +147,7 @@ def main() -> None:
                 namespace=namespace,
                 data_dir=data_dir,
                 scale_factor=scale_factor,
+                tables=tables,
             )
             load_error = result.error
 
@@ -133,6 +155,7 @@ def main() -> None:
             from benchmarks import analytical
             results = analytical.run(
                 runner=runner,
+                suite=suite,
                 namespace=namespace,
                 scale_factor=scale_factor,
                 warmup_runs=bench_cfg["warmup_runs"],
@@ -194,7 +217,7 @@ def main() -> None:
         engine.teardown()
         if not args.keep_tables and not args.skip_datagen:
             print(f"\nTearing down namespace '{namespace}'...")
-            catalog.teardown(namespace=namespace)
+            catalog.teardown(namespace=namespace, tables=tables)
 
         # The load benchmark has no per-query rows — its single timed unit is the
         # provisioning bracketed by benchmark_start/end.

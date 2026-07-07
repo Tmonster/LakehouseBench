@@ -37,7 +37,7 @@ class AthenaEngine(Engine):
         self._athena_catalog: str = props.get("athena_catalog", "s3tablescatalog")
         self._client = None
 
-    def setup(self) -> None:
+    def setup(self, tables: list[str]) -> None:
         self._client = boto3.client("athena", region_name=self._region)
 
     def teardown(self) -> None:

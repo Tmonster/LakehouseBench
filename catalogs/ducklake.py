@@ -25,11 +25,6 @@ from typing import Any
 
 from catalogs.base import Catalog, CatalogConfig
 
-TPCH_TABLES = [
-    "customer", "lineitem", "nation", "orders",
-    "part", "partsupp", "region", "supplier",
-]
-
 _ALIAS = "ducklake_catalog"
 
 
@@ -61,17 +56,17 @@ class DuckLakeCatalog(Catalog):
         self.data_path = config.extra.get("data_path", "ducklake/files")
         self.region = config.extra.get("region")
 
-    def provision(self, namespace: str, data_dir: Path) -> None:
-        from setup.write_tables import write_tpch_tables
-        write_tpch_tables(catalog=self, namespace=namespace, data_dir=data_dir)
+    def provision(self, namespace: str, data_dir: Path, tables: list[str]) -> None:
+        from setup.write_tables import write_tables
+        write_tables(catalog=self, namespace=namespace, data_dir=data_dir, tables=tables)
 
-    def teardown(self, namespace: str) -> None:
+    def teardown(self, namespace: str, tables: list[str]) -> None:
         import duckdb
         from engines.duckdb.catalog_adapters import attach_catalog
 
         with duckdb.connect() as conn:
             alias = attach_catalog(conn, self)
-            for table in TPCH_TABLES:
+            for table in tables:
                 try:
                     conn.execute(f"DROP TABLE IF EXISTS {alias}.{namespace}.{table}")
                 except Exception:

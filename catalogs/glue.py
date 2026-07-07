@@ -21,11 +21,6 @@ from typing import Any
 
 from catalogs.base import Catalog, CatalogConfig
 
-TPCH_TABLES = [
-    "customer", "lineitem", "nation", "orders",
-    "part", "partsupp", "region", "supplier",
-]
-
 
 class GlueCatalog(Catalog):
     def __init__(self, config: CatalogConfig):
@@ -35,17 +30,17 @@ class GlueCatalog(Catalog):
         # Strip trailing slash so per-table joins produce a single separator.
         self.base_location: str = config.extra["base_location"].rstrip("/")
 
-    def provision(self, namespace: str, data_dir: Path) -> None:
-        from setup.write_tables import write_tpch_tables
-        write_tpch_tables(catalog=self, namespace=namespace, data_dir=data_dir)
+    def provision(self, namespace: str, data_dir: Path, tables: list[str]) -> None:
+        from setup.write_tables import write_tables
+        write_tables(catalog=self, namespace=namespace, data_dir=data_dir, tables=tables)
 
-    def teardown(self, namespace: str) -> None:
+    def teardown(self, namespace: str, tables: list[str]) -> None:
         import duckdb
         from engines.duckdb.catalog_adapters import attach_catalog
 
         with duckdb.connect() as conn:
             alias = attach_catalog(conn, self)
-            for table in TPCH_TABLES:
+            for table in tables:
                 try:
                     conn.execute(f"DROP TABLE IF EXISTS {alias}.{namespace}.{table}")
                 except Exception:

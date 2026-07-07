@@ -16,7 +16,7 @@ class SparkEngine(Engine):
     def version(self) -> str:
         return self._spark.version if self._spark is not None else "unknown"
 
-    def setup(self) -> None:
+    def setup(self, tables: list[str]) -> None:
         import os
         import sys
         from pyspark.sql import SparkSession

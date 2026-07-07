@@ -14,11 +14,6 @@ from engines.duckdb.catalog_adapters import (
     setup_local_views,
 )
 
-TPCH_TABLES = [
-    "customer", "lineitem", "nation", "orders",
-    "part", "partsupp", "region", "supplier",
-]
-
 
 class _DuckDBCursorEngine:
     """
@@ -57,8 +52,8 @@ class _DuckDBCursorEngine:
         lineitem = str((data_dir / f"lineitem_u{set_n}.parquet").absolute())
         if self._use_transactions:
             self._cursor.begin()
-        self._cursor.execute(f"INSERT INTO orders SELECT * FROM read_parquet('{orders}')")
-        self._cursor.execute(f"INSERT INTO lineitem SELECT * FROM read_parquet('{lineitem}')")
+        self._cursor.execute(f"INSERT INTO orders SELECT * FROM read_parquet('{orders}', hive_partitioning=false)")
+        self._cursor.execute(f"INSERT INTO lineitem SELECT * FROM read_parquet('{lineitem}', hive_partitioning=false)")
         if self._use_transactions:
             self._cursor.commit()
 
@@ -100,7 +95,7 @@ class DuckDBEngine(Engine):
             self._conn.execute(f"USE {self._catalog_alias}.{namespace}")
             self._current_namespace = namespace
 
-    def setup(self) -> None:
+    def setup(self, tables: list[str]) -> None:
         self._conn = duckdb.connect()
         self._catalog_alias = attach_catalog(self._conn, self.catalog)
 
@@ -111,7 +106,7 @@ class DuckDBEngine(Engine):
                 conn=self._conn,
                 warehouse_path=props["warehouse_path"],
                 namespace=self.catalog.config.namespace,
-                tables=TPCH_TABLES,
+                tables=tables,
             )
 
     def run_query(self, sql: str, namespace: str) -> tuple[list[tuple], list[str], int]:
@@ -135,8 +130,8 @@ class DuckDBEngine(Engine):
         lineitem = str((data_dir / f"lineitem_u{set_n}.parquet").absolute())
         if self._use_transactions:
             self._conn.begin()
-        self._conn.execute(f"INSERT INTO orders SELECT * FROM read_parquet('{orders}')")
-        self._conn.execute(f"INSERT INTO lineitem SELECT * FROM read_parquet('{lineitem}')")
+        self._conn.execute(f"INSERT INTO orders SELECT * FROM read_parquet('{orders}', hive_partitioning=false)")
+        self._conn.execute(f"INSERT INTO lineitem SELECT * FROM read_parquet('{lineitem}', hive_partitioning=false)")
         if self._use_transactions:
             self._conn.commit()
 

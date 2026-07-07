@@ -10,28 +10,22 @@ from typing import Any
 from catalogs.base import Catalog, CatalogConfig
 
 
-TPCH_TABLES = [
-    "customer", "lineitem", "nation", "orders",
-    "part", "partsupp", "region", "supplier",
-]
-
-
 class LocalCatalog(Catalog):
     def __init__(self, config: CatalogConfig):
         super().__init__(config)
         self.warehouse_path = Path(config.extra.get("warehouse_path", "warehouse"))
         self.warehouse_path.mkdir(parents=True, exist_ok=True)
 
-    def provision(self, namespace: str, data_dir: Path) -> None:
-        from setup.write_tables import write_tpch_tables
+    def provision(self, namespace: str, data_dir: Path, tables: list[str]) -> None:
+        from setup.write_tables import write_tables
 
         cat = self._pyiceberg_catalog()
         cat.create_namespace_if_not_exists(namespace)
-        write_tpch_tables(catalog=self, namespace=namespace, data_dir=data_dir)
+        write_tables(catalog=self, namespace=namespace, data_dir=data_dir, tables=tables)
 
-    def teardown(self, namespace: str) -> None:
+    def teardown(self, namespace: str, tables: list[str]) -> None:
         cat = self._pyiceberg_catalog()
-        for table in TPCH_TABLES:
+        for table in tables:
             try:
                 cat.drop_table(f"{namespace}.{table}")
             except Exception:
