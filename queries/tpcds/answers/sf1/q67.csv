@@ -1,0 +1,101 @@
+i_category,i_class,i_brand,i_product_name,d_year,d_qoy,d_moy,s_store_id,sumsales,rk
+,,,,,,,,104996.99,72
+,,,,,,,,582893.38,4
+,,,,,,,,1641694.80,3
+,,,,,,,,3304196.14,2
+,,,,,,,,1018289131.65,1
+,,,,2000,,,,104996.99,72
+,,,ablepriablebarought,,,,,133866.27,25
+,,,ablepriablebarought,2000,,,,133866.27,25
+,,,ablepriablebarought,2000,4,,,71448.81,99
+,,,antiationeinganti,,,,,112978.44,60
+,,,antiationeinganti,2000,,,,112978.44,60
+,,,barationableeing,,,,,102638.16,77
+,,,barationableeing,2000,,,,102638.16,77
+,,,eingcallyoughteing,,,,,128413.52,31
+,,,eingcallyoughteing,2000,,,,128413.52,31
+,,"brandmaxi #2",,,,,,119982.95,43
+,,"brandmaxi #2",oughteingought,,,,,119982.95,43
+,,"brandmaxi #2",oughteingought,2000,,,,119982.95,43
+,,"corpunivamalg #3",,,,,,89122.90,90
+,,"corpunivamalg #3",eseantin stationought,,,,,89122.90,90
+,,"corpunivamalg #3",eseantin stationought,2000,,,,89122.90,90
+,,"edu packamalg #2",,,,,,121160.53,40
+,,"edu packamalg #2",oughtn stn stese,,,,,121160.53,40
+,,"edu packamalg #2",oughtn stn stese,2000,,,,121160.53,40
+,,"edu packamalgamalg #17",,,,,,91345.46,87
+,,"edu packamalgamalg #17",,,,,,91345.46,87
+,,"edu packamalgamalg #17",,2000,,,,91345.46,87
+,,"edu packexporti #1",,,,,,113387.47,49
+,,"edu packexporti #1",,,,,,113387.47,49
+,,"edu packexporti #1",,2000,,,,113387.47,49
+,,"exportiedu pack #2",,,,,,116327.41,46
+,,"exportiedu pack #2",,,,,,116327.41,46
+,,"exportiedu pack #2",,2000,,,,116327.41,46
+,,"exportischolar #2",,,,,,106344.18,69
+,,"exportischolar #2",prieingeseought,,,,,106344.18,69
+,,"exportischolar #2",prieingeseought,2000,,,,106344.18,69
+,,"importoedu pack #1",,,,,,178343.57,6
+,,"importoedu pack #1",,,,,,178343.57,6
+,,"importoedu pack #1",,2000,,,,178343.57,6
+,,"importoedu pack #1",,2000,4,,,78852.64,97
+,,"namelesscorp #1",,,,,,122786.95,37
+,,"namelesscorp #1",,,,,,122786.95,37
+,,"namelesscorp #1",,2000,,,,122786.95,37
+,archery,,,,,,,128733.40,27
+,archery,"amalgmaxi #6",,,,,,128733.40,27
+,archery,"amalgmaxi #6",antioughtn stought,,,,,128733.40,27
+,archery,"amalgmaxi #6",antioughtn stought,2000,,,,128733.40,27
+,baseball,,,,,,,94225.09,83
+,baseball,,,,,,,94225.09,83
+,baseball,,,,,,,94225.09,83
+,baseball,,,2000,,,,94225.09,83
+,dresses,,,,,,,142365.59,17
+,dresses,,,,,,,142365.59,17
+,dresses,,antieseoughtcally,,,,,142365.59,17
+,dresses,,antieseoughtcally,2000,,,,142365.59,17
+,flatware,,,,,,,113227.20,56
+,flatware,,,,,,,113227.20,56
+,flatware,,oughteingationn st,,,,,113227.20,56
+,flatware,,oughteingationn st,2000,,,,113227.20,56
+,glassware,,,,,,,147088.19,13
+,glassware,,,,,,,147088.19,13
+,glassware,,,,,,,147088.19,13
+,glassware,,,2000,,,,147088.19,13
+,outdoor,,,,,,,82971.57,93
+,outdoor,"namelessnameless #3",,,,,,82971.57,93
+,outdoor,"namelessnameless #3",,,,,,82971.57,93
+,outdoor,"namelessnameless #3",,2000,,,,82971.57,93
+,pants,,,,,,,113256.55,52
+,pants,"exportiimporto #2",,,,,,113256.55,52
+,pants,"exportiimporto #2",antibarableableought,,,,,113256.55,52
+,pants,"exportiimporto #2",antibarableableought,2000,,,,113256.55,52
+,scanners,,,,,,,123664.82,33
+,scanners,"namelessunivamalg #10",,,,,,123664.82,33
+,scanners,"namelessunivamalg #10",n stbaresepri,,,,,123664.82,33
+,scanners,"namelessunivamalg #10",n stbaresepri,2000,,,,123664.82,33
+,scanners,"namelessunivamalg #10",n stbaresepri,2000,4,,,73762.76,98
+,semi-precious,,,,,,,138486.12,21
+,semi-precious,"amalgbrand #4",,,,,,138486.12,21
+,semi-precious,"amalgbrand #4",ationeseoughtanti,,,,,138486.12,21
+,semi-precious,"amalgbrand #4",ationeseoughtanti,2000,,,,138486.12,21
+,sports-apparel,,,,,,,152312.06,9
+,sports-apparel,,,,,,,152312.06,9
+,sports-apparel,,,,,,,152312.06,9
+,sports-apparel,,,2000,,,,152312.06,9
+,sports-apparel,,,2000,4,,,70944.68,100
+,swimwear,,,,,,,96169.13,79
+,swimwear,"edu packamalg #2",,,,,,96169.13,79
+,swimwear,"edu packamalg #2",antieingoughtcally,,,,,96169.13,79
+,swimwear,"edu packamalg #2",antieingoughtcally,2000,,,,96169.13,79
+,tennis,,,,,,,110844.40,62
+,tennis,,,,,,,110844.40,62
+,tennis,,barpribaranti,,,,,110844.40,62
+,tennis,,barpribaranti,2000,,,,110844.40,62
+,womens,,,,,,,104155.36,74
+,womens,,,,,,,104155.36,74
+,womens,,,,,,,211394.20,5
+,womens,,,2000,,,,104155.36,74
+,womens,"amalgedu pack #2",,,,,,107238.84,66
+,womens,"amalgedu pack #2",,,,,,107238.84,66
+,womens,"amalgedu pack #2",,2000,,,,107238.84,66

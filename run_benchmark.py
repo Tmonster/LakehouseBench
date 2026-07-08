@@ -23,15 +23,15 @@ from benchmarks import record
 from benchmarks.runner import BenchmarkRunner
 from benchmarks.suite import get_suite
 
-BENCHMARK_CHOICES = ["load", "analytical", "power", "throughput", "composite"]
+BENCHMARK_CHOICES = ["load", "analytical", "power", "throughput", "composite", "maintenance", "compaction"]
 SUITE_CHOICES = ["tpch", "tpcds"]
 
-# Benchmarks each suite supports. TPC-DS currently supports only load + analytical
-# (data-maintenance and compaction land in later phases); the TPC-H power/throughput/
-# composite tests depend on the TPC-H refresh model and are not defined for TPC-DS.
+# Benchmarks each suite supports. The TPC-H power/throughput/composite tests depend on
+# the TPC-H refresh model and are not defined for TPC-DS; maintenance/compaction are
+# TPC-DS-only for now.
 SUITE_BENCHMARKS = {
-    "tpch": set(BENCHMARK_CHOICES),
-    "tpcds": {"load", "analytical"},
+    "tpch": {"load", "analytical", "power", "throughput", "composite"},
+    "tpcds": {"load", "analytical", "maintenance", "compaction"},
 }
 
 
@@ -50,6 +50,11 @@ def main() -> None:
                         help="Skip data generation and use existing data in --namespace")
     parser.add_argument("--update-streams", type=int, default=None,
                         help="Number of refresh sets in the throughput test (default: max(1, round(0.1 * sf)))")
+    parser.add_argument("--dm-rounds", type=int, default=0,
+                        help="TPC-DS only: data-maintenance rounds to apply. For --benchmark "
+                             "maintenance these rounds are timed; for other benchmarks they "
+                             "are applied untimed as setup (mutating the table into a "
+                             "post-maintenance state before measuring).")
     args = parser.parse_args()
 
     # Every recorded run must carry a machine identity — fail fast before any
@@ -74,6 +79,10 @@ def main() -> None:
             f"'{args.benchmark}' is not supported for the {suite.name} suite "
             f"(supported: {supported})"
         )
+    if args.dm_rounds and suite.name != "tpcds":
+        parser.error("--dm-rounds is only valid for --suite tpcds")
+    if args.benchmark == "maintenance" and args.dm_rounds < 1:
+        parser.error("--benchmark maintenance requires --dm-rounds >= 1")
 
     catalog_cfg = yaml.safe_load(Path(args.catalog_config).read_text())
     bench_cfg = yaml.safe_load(Path(args.benchmark_config).read_text())
@@ -114,21 +123,46 @@ def main() -> None:
     # metadata file, which DuckDB rejects as a file-handle conflict.
     if args.benchmark != "load":
         engine.setup(tables)
+
+    # TPC-DS: bring the table into a post-maintenance state before measuring. For
+    # --benchmark maintenance the rounds ARE the timed work (run below), so skip here.
+    if args.dm_rounds and args.benchmark not in ("load", "maintenance"):
+        from benchmarks import data_maintenance
+        data_maintenance.provision_rounds(engine, namespace, data_dir, args.dm_rounds)
+
     run_id = uuid.uuid4().hex
     instance = record.bench_instance_type()
     engine_version = engine.version()
+
+    # dm_rounds tags every recorded row so results can be grouped by maintenance depth.
+    dm_rounds = args.dm_rounds
 
     # Helpers that inject the per-run context (run_id/instance/version) into rows.
     def q_row(qr):
         return record.time_row_from_query(
             qr, run_id=run_id, bench_instance_type=instance, engine_version=engine_version,
+            dm_rounds=dm_rounds,
         )
 
     def rf_row(rf, benchmark):
         return record.time_row_from_refresh(
             rf, run_id=run_id, bench_instance_type=instance, engine=args.engine,
             engine_version=engine_version, scale_factor=scale_factor,
-            benchmark=benchmark, namespace=namespace,
+            benchmark=benchmark, namespace=namespace, dm_rounds=dm_rounds,
+        )
+
+    def dm_row(op):
+        return record.time_row_from_dm_op(
+            op, run_id=run_id, bench_instance_type=instance, engine=args.engine,
+            engine_version=engine_version, scale_factor=scale_factor,
+            benchmark="maintenance", namespace=namespace, dm_rounds=dm_rounds,
+        )
+
+    def compaction_row(result):
+        return record.time_row_from_compaction(
+            result, run_id=run_id, bench_instance_type=instance, engine=args.engine,
+            engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
+            dm_rounds=dm_rounds,
         )
 
     # benchmark_start_time is scoped to the query phase — provisioning (done above,
@@ -137,6 +171,7 @@ def main() -> None:
     benchmark_end = None
     time_rows: list[tuple] = []
     power_score = throughput_score = composite_score = None
+    compaction_stats = None   # (stats_before, stats_after) for the log row on compaction runs
     load_error = None
     try:
         if args.benchmark == "load":
@@ -160,8 +195,27 @@ def main() -> None:
                 scale_factor=scale_factor,
                 warmup_runs=bench_cfg["warmup_runs"],
                 benchmark_runs=bench_cfg["benchmark_runs"],
+                # Reference answers only apply to the pristine load; skip verification
+                # once data-maintenance rounds have mutated the table.
+                verify=(args.dm_rounds == 0),
             )
             time_rows = [q_row(r) for r in results]
+
+        elif args.benchmark == "maintenance":
+            from benchmarks import data_maintenance
+            results = data_maintenance.run(
+                runner=runner,
+                namespace=namespace,
+                data_dir=data_dir,
+                rounds=args.dm_rounds,
+            )
+            time_rows = [dm_row(op) for op in results]
+
+        elif args.benchmark == "compaction":
+            from benchmarks import compaction
+            result = compaction.run(runner=runner, namespace=namespace)
+            time_rows = [compaction_row(result)]
+            compaction_stats = (result.stats_before, result.stats_after)
 
         elif args.benchmark == "power":
             from benchmarks import power
@@ -226,8 +280,10 @@ def main() -> None:
                 run_id=run_id, bench_instance_type=instance, engine=args.engine,
                 engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
                 query_start_time=benchmark_start, query_end_time=benchmark_end, error=load_error,
+                dm_rounds=dm_rounds,
             )]
 
+        before, after = compaction_stats or (None, None)
         log = record.log_row(
             run_id=run_id,
             benchmark_start_time=benchmark_start,
@@ -241,6 +297,11 @@ def main() -> None:
             power_score=power_score,
             throughput_score=throughput_score,
             composite_score=composite_score,
+            dm_rounds=dm_rounds,
+            files_before=before["file_count"] if before else None,
+            files_after=after["file_count"] if after else None,
+            delete_files_before=before["delete_file_count"] if before else None,
+            delete_files_after=after["delete_file_count"] if after else None,
             **catalog.catalog_info(),
         )
         record.append_log(result_dir, log)

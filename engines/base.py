@@ -4,7 +4,7 @@ from typing import Any
 
 from catalogs.base import Catalog
 
-_ALL_BENCHMARKS = frozenset({"load", "analytical", "power", "throughput", "composite"})
+_ALL_BENCHMARKS = frozenset({"load", "analytical", "power", "throughput", "composite", "maintenance", "compaction"})
 
 
 class Engine(ABC):
@@ -51,6 +51,22 @@ class Engine(ABC):
         RF2: delete rows from the live tables using local parquet delete keys.
         Reads delete_set_{set_n}.parquet from data_dir.
         """
+
+    def load_staging(self, round_dir: Path, namespace: str) -> None:
+        """Load a TPC-DS data-maintenance round's Parquet files into staging tables."""
+        raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
+
+    def run_maintenance(self, sql: str, namespace: str) -> None:
+        """Execute one TPC-DS data-maintenance function against the catalog."""
+        raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
+
+    def optimize(self, namespace: str) -> None:
+        """Compact the catalog (merge small data files). The compaction benchmark times this."""
+        raise NotImplementedError(f"{type(self).__name__} does not support compaction")
+
+    def table_stats(self, namespace: str) -> dict[str, int]:
+        """Return catalog health metrics (file/delete-file counts and sizes)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support table stats")
 
     def fork_for_stream(self) -> "Engine":
         """

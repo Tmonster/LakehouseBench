@@ -55,6 +55,11 @@ class DuckLakeCatalog(Catalog):
         # Kept as a raw string: Path() would mangle an s3:// URI ("s3://" -> "s3:/").
         self.data_path = config.extra.get("data_path", "ducklake/files")
         self.region = config.extra.get("region")
+        # DuckLake inlines small writes into the metadata catalog by default, which hides
+        # the small-file degeneration a compaction benchmark exists to measure. Set
+        # data_inlining_row_limit: 0 in the config to force every commit to write a data
+        # file (matching Iceberg/Delta behavior). None leaves the DuckLake default.
+        self.data_inlining_row_limit = config.extra.get("data_inlining_row_limit")
 
     def provision(self, namespace: str, data_dir: Path, tables: list[str]) -> None:
         from setup.write_tables import write_tables
@@ -100,4 +105,5 @@ class DuckLakeCatalog(Catalog):
             "metadata_path": str(self.metadata_path.absolute()),
             "data_path": data_path,
             "region": self.region,
+            "data_inlining_row_limit": self.data_inlining_row_limit,
         }

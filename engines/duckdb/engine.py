@@ -152,6 +152,95 @@ class DuckDBEngine(Engine):
         if self._use_transactions:
             self._conn.commit()
 
+    def load_staging(self, round_dir: Path, namespace: str) -> None:
+        """
+        Load a data-maintenance round's Parquet files into temporary staging tables.
+
+        Each file becomes a TEMP table named after its stem, so the maintenance SQL can
+        reference it unqualified alongside the catalog's fact/dimension tables. The delete
+        range files are renamed to dm_delete / dm_inventory_delete (avoiding the DELETE
+        keyword) to match the DF_ maintenance SQL.
+        """
+        assert self._conn is not None, "Call setup() before load_staging()"
+        self._use(namespace)
+        rename = {"delete": "dm_delete", "inventory_delete": "dm_inventory_delete"}
+        for pq in sorted(round_dir.glob("*.parquet")):
+            table = rename.get(pq.stem, pq.stem)
+            self._conn.execute(
+                f"CREATE OR REPLACE TEMP TABLE {table} AS "
+                f"SELECT * FROM read_parquet('{pq.absolute()}', hive_partitioning=false)"
+            )
+
+    # Target size (bytes) for compacted output files. Small data files below this are
+    # candidates for consolidation; ~256 MB is a common lakehouse target file size.
+    _COMPACT_TARGET_BYTES = 256 * 1024 * 1024
+
+    def optimize(self, namespace: str) -> None:
+        """
+        Compact the catalog. This is the timed unit of the compaction benchmark.
+
+        Two steps, because data-maintenance produces both small files and delete files:
+          1. rewrite_data_files(delete_threshold => 0) — rewrites every file carrying
+             deletes, applying them and consolidating (merge_adjacent_files skips files
+             with pending deletes, so this is required to compact a maintained table).
+          2. merge_adjacent_files(max_file_size => target) — bin-packs the remaining small
+             delete-free files up to the target size.
+
+        DuckLake only — the Iceberg extension is read-mostly and cannot rewrite data files
+        (Spark/Iceberg lands later). Snapshot expiry / orphan cleanup (space reclamation)
+        are separate, exposed via reclaim().
+        """
+        assert self._conn is not None, "Call setup() before optimize()"
+        if not isinstance(self.catalog, DuckLakeCatalog):
+            raise NotImplementedError(
+                "compaction is only implemented for the DuckLake catalog on DuckDB"
+            )
+        alias = self._catalog_alias
+        self._conn.execute(f"CALL ducklake_rewrite_data_files('{alias}', delete_threshold => 0.0)")
+        self._conn.execute(
+            f"CALL ducklake_merge_adjacent_files('{alias}', max_file_size => {self._COMPACT_TARGET_BYTES})"
+        )
+
+    def reclaim(self, namespace: str) -> None:
+        """Expire old snapshots and delete orphaned files (post-compaction reclamation)."""
+        assert self._conn is not None, "Call setup() before reclaim()"
+        if not isinstance(self.catalog, DuckLakeCatalog):
+            raise NotImplementedError("reclaim is only implemented for the DuckLake catalog")
+        self._conn.execute(
+            f"CALL ducklake_expire_snapshots('{self._catalog_alias}', older_than => now())"
+        )
+        self._conn.execute(f"CALL ducklake_cleanup_old_files('{self._catalog_alias}', older_than => now())")
+
+    def table_stats(self, namespace: str) -> dict[str, int]:
+        """
+        Aggregate catalog health metrics: data-file count/bytes and delete-file count/bytes.
+        Used to characterize the table state before/after compaction. DuckLake only.
+        """
+        assert self._conn is not None, "Call setup() before table_stats()"
+        if not isinstance(self.catalog, DuckLakeCatalog):
+            raise NotImplementedError("table_stats is only implemented for the DuckLake catalog")
+        row = self._conn.execute(f"""
+            SELECT coalesce(sum(file_count), 0), coalesce(sum(file_size_bytes), 0),
+                   coalesce(sum(delete_file_count), 0), coalesce(sum(delete_file_size_bytes), 0)
+            FROM ducklake_table_info('{self._catalog_alias}')
+        """).fetchone()
+        return {
+            "file_count": int(row[0]),
+            "file_size_bytes": int(row[1]),
+            "delete_file_count": int(row[2]),
+            "delete_file_size_bytes": int(row[3]),
+        }
+
+    def run_maintenance(self, sql: str, namespace: str) -> None:
+        """Execute one data-maintenance function (a multi-statement SQL script)."""
+        assert self._conn is not None, "Call setup() before run_maintenance()"
+        self._use(namespace)
+        # Strip line comments first so a ';' inside a -- comment doesn't split a statement.
+        stripped = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
+        for stmt in (s.strip() for s in stripped.split(";")):
+            if stmt:
+                self._conn.execute(stmt)
+
     def fork_for_stream(self) -> _DuckDBCursorEngine:
         assert self._conn is not None, "Call setup() before fork_for_stream()"
         return _DuckDBCursorEngine(self._conn.cursor(), self._catalog_alias, self._use_transactions)

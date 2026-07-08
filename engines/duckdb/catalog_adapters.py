@@ -130,6 +130,13 @@ def _attach_ducklake(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
     conn.execute(
         f"ATTACH 'ducklake:{metadata_path}' AS {_DUCKLAKE_ALIAS} (DATA_PATH '{data_path}')"
     )
+    # Optionally disable small-write inlining so every commit writes a real data file
+    # (see DuckLakeCatalog.data_inlining_row_limit). Persisted as a global DuckLake option.
+    limit = props.get("data_inlining_row_limit")
+    if limit is not None:
+        conn.execute(
+            f"CALL ducklake_set_option('{_DUCKLAKE_ALIAS}', 'data_inlining_row_limit', '{limit}')"
+        )
     return _DUCKLAKE_ALIAS
 
 
