@@ -13,10 +13,10 @@ Two entry points:
   * provision_rounds() — applies rounds untimed, to bring a table into a known degenerate
                          state before an analytical or compaction benchmark.
 
-Scope: the fact-table channel for store sales/returns is implemented and tested. Catalog
-and web sales/returns, inventory, and the dimension SCD updates follow the same staging →
-LF → DF structure and are added as further entries in DM_FUNCTIONS / the maintenance SQL
-directory.
+Scope: all three sales channels (store/catalog/web) sales+returns are implemented — the
+LF_* load-fact inserts and DF_* delete-fact deletes. Inventory and the dimension SCD
+updates follow the same staging → LF → DF structure and are added as further entries in
+DM_FUNCTIONS / the maintenance SQL directory.
 """
 from __future__ import annotations
 
@@ -31,7 +31,10 @@ MAINTENANCE_DIR = Path("queries/tpcds/maintenance")
 
 # Ordered list of maintenance functions applied per round. Load-Fact (lf_*) inserts
 # run before Delete-Fact (df_*) deletes, per the TPC-DS data-maintenance model.
-DM_FUNCTIONS: list[str] = ["lf_ss", "lf_sr", "df_ss"]
+DM_FUNCTIONS: list[str] = [
+    "lf_ss", "lf_sr", "lf_cs", "lf_cr", "lf_ws", "lf_wr",
+    "df_ss", "df_cs", "df_ws",
+]
 
 
 @dataclass

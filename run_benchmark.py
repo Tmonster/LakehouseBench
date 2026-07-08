@@ -136,33 +136,36 @@ def main() -> None:
 
     # dm_rounds tags every recorded row so results can be grouped by maintenance depth.
     dm_rounds = args.dm_rounds
+    # suite ("tpch"/"tpcds") tags every row so otherwise-identical analytical/load rows
+    # stay distinguishable across suites.
+    suite_name = suite.name
 
     # Helpers that inject the per-run context (run_id/instance/version) into rows.
     def q_row(qr):
         return record.time_row_from_query(
             qr, run_id=run_id, bench_instance_type=instance, engine_version=engine_version,
-            dm_rounds=dm_rounds,
+            dm_rounds=dm_rounds, suite=suite_name,
         )
 
     def rf_row(rf, benchmark):
         return record.time_row_from_refresh(
             rf, run_id=run_id, bench_instance_type=instance, engine=args.engine,
             engine_version=engine_version, scale_factor=scale_factor,
-            benchmark=benchmark, namespace=namespace, dm_rounds=dm_rounds,
+            benchmark=benchmark, namespace=namespace, dm_rounds=dm_rounds, suite=suite_name,
         )
 
     def dm_row(op):
         return record.time_row_from_dm_op(
             op, run_id=run_id, bench_instance_type=instance, engine=args.engine,
             engine_version=engine_version, scale_factor=scale_factor,
-            benchmark="maintenance", namespace=namespace, dm_rounds=dm_rounds,
+            benchmark="maintenance", namespace=namespace, dm_rounds=dm_rounds, suite=suite_name,
         )
 
     def compaction_row(result):
         return record.time_row_from_compaction(
             result, run_id=run_id, bench_instance_type=instance, engine=args.engine,
             engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
-            dm_rounds=dm_rounds,
+            dm_rounds=dm_rounds, suite=suite_name,
         )
 
     # benchmark_start_time is scoped to the query phase — provisioning (done above,
@@ -280,7 +283,7 @@ def main() -> None:
                 run_id=run_id, bench_instance_type=instance, engine=args.engine,
                 engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
                 query_start_time=benchmark_start, query_end_time=benchmark_end, error=load_error,
-                dm_rounds=dm_rounds,
+                dm_rounds=dm_rounds, suite=suite_name,
             )]
 
         before, after = compaction_stats or (None, None)
@@ -302,6 +305,7 @@ def main() -> None:
             files_after=after["file_count"] if after else None,
             delete_files_before=before["delete_file_count"] if before else None,
             delete_files_after=after["delete_file_count"] if after else None,
+            suite=suite_name,
             **catalog.catalog_info(),
         )
         record.append_log(result_dir, log)
