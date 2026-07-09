@@ -36,30 +36,6 @@ DM_FUNCTIONS: list[str] = [
     "df_ss", "df_cs", "df_ws",
 ]
 
-# Delete-Fact channels: each df_* function deletes from a sales fact and its correlated
-# returns fact, keyed on the sales/returned date surrogate key. Rather than one DELETE
-# that joins date_dim against the whole dm_delete table, each fact is deleted with a
-# parameterized statement (df.sql) run once per date range in the round's delete.parquet —
-# a plan that scales far better on Spark and on DuckDB at high SF. The union of the ranges
-# is identical to the old form, and matches the spec's per-range application (Clause 5.3.8).
-DELETE_FACTS: dict[str, list[tuple[str, str]]] = {
-    "df_ss": [("store_sales", "ss_sold_date_sk"), ("store_returns", "sr_returned_date_sk")],
-    "df_cs": [("catalog_sales", "cs_sold_date_sk"), ("catalog_returns", "cr_returned_date_sk")],
-    "df_ws": [("web_sales", "ws_sold_date_sk"), ("web_returns", "wr_returned_date_sk")],
-}
-
-
-def _delete_fact_statements(fn: str) -> list[str]:
-    """Parameterized DELETE statements (one per fact table) for a df_* function.
-
-    Line comments and the trailing ';' are stripped so each item is a single clean
-    statement — Spark's sql() rejects a trailing semicolon.
-    """
-    template = _function_sql("df")
-    body = "\n".join(line.split("--", 1)[0] for line in template.splitlines())
-    body = body.strip().rstrip(";").strip()
-    return [body.format(table=t, date_sk=c) for t, c in DELETE_FACTS[fn]]
-
 
 @dataclass
 class OpResult:
@@ -98,16 +74,12 @@ def apply_round(engine, namespace: str, data_dir: Path, u: int, record: bool = T
 
     results: list[OpResult] = []
     for fn in DM_FUNCTIONS:
+        sql = _function_sql(fn)
         start_iso = datetime.now(timezone.utc).isoformat()
         start = time.perf_counter()
         error = None
         try:
-            if fn in DELETE_FACTS:
-                # Delete-Fact: run each fact's parameterized DELETE once per date range
-                # in the staged dm_delete table (see df.sql / DELETE_FACTS).
-                engine.run_delete_fact(_delete_fact_statements(fn), namespace)
-            else:
-                engine.run_maintenance(_function_sql(fn), namespace)
+            engine.run_maintenance(sql, namespace)
         except Exception as e:
             error = str(e)
         elapsed = round(time.perf_counter() - start, 4)

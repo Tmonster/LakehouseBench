@@ -60,14 +60,6 @@ class Engine(ABC):
         """Execute one TPC-DS data-maintenance function against the catalog."""
         raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
 
-    def run_delete_fact(self, statements: list[str], namespace: str) -> None:
-        """
-        Execute the Delete-Fact statements for one df_* function. Each statement is a
-        parameterized DELETE (df.sql, with two positional `?` bind points for a date
-        window) run once per (date1, date2) row of the staged dm_delete table.
-        """
-        raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
-
     def supports_compaction(self, catalog: Catalog) -> bool:
         """
         Whether THIS engine can compact THIS catalog's tables. Compaction is a property of

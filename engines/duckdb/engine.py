@@ -239,25 +239,6 @@ class DuckDBEngine(Engine):
             if stmt:
                 self._conn.execute(stmt)
 
-    def run_delete_fact(self, statements: list[str], namespace: str) -> None:
-        """
-        Run each Delete-Fact statement once per date range staged in dm_delete.
-
-        The range windows come from the staged dm_delete table (date1, date2); each
-        parameterized DELETE binds one window at a time. All deletes for the function
-        run in a single transaction (DuckLake) so the round commits atomically.
-        """
-        assert self._conn is not None, "Call setup() before run_delete_fact()"
-        self._use(namespace)
-        ranges = self._conn.execute("SELECT date1, date2 FROM dm_delete").fetchall()
-        if self._use_transactions:
-            self._conn.begin()
-        for stmt in statements:
-            for date1, date2 in ranges:
-                self._conn.execute(stmt, [date1, date2])
-        if self._use_transactions:
-            self._conn.commit()
-
     def fork_for_stream(self) -> _DuckDBCursorEngine:
         assert self._conn is not None, "Call setup() before fork_for_stream()"
         return _DuckDBCursorEngine(self._conn.cursor(), self._catalog_alias, self._use_transactions)

@@ -96,25 +96,6 @@ class SparkEngine(Engine):
             if stmt:
                 self._spark.sql(stmt)
 
-    def run_delete_fact(self, statements: list[str], namespace: str) -> None:
-        """
-        Run each Delete-Fact statement once per date range staged in dm_delete.
-
-        The (date1, date2) windows are collected from the dm_delete temp view and inlined
-        as DATE literals — Spark's positional-arg binding (`?`) does not propagate into the
-        subquery of a DELETE ... WHERE col IN (SELECT ...), leaving the params unbound
-        (UNBOUND_SQL_PARAMETER). The windows come from our own generated parquet, so
-        literal substitution is safe here. This still avoids the date_dim × dm_delete join
-        that Spark planned as an expensive broadcast/semijoin over the full fact table.
-        """
-        assert self._spark is not None, "Call setup() before run_delete_fact()"
-        self._spark.sql(f"USE {self._catalog_alias}.{namespace}")
-        ranges = [(r["date1"], r["date2"]) for r in self._spark.sql("SELECT date1, date2 FROM dm_delete").collect()]
-        for stmt in statements:
-            for date1, date2 in ranges:
-                bound = stmt.replace("?", f"DATE '{date1}'", 1).replace("?", f"DATE '{date2}'", 1)
-                self._spark.sql(bound)
-
     # Target compacted file size (bytes) — matches the DuckDB engine's 256 MB target.
     _COMPACT_TARGET_BYTES = 256 * 1024 * 1024
 
