@@ -60,6 +60,23 @@ class Engine(ABC):
         """Execute one TPC-DS data-maintenance function against the catalog."""
         raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
 
+    def run_delete_fact(self, statements: list[str], namespace: str) -> None:
+        """
+        Execute the Delete-Fact statements for one df_* function. Each statement is a
+        parameterized DELETE (df.sql, with two positional `?` bind points for a date
+        window) run once per (date1, date2) row of the staged dm_delete table.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
+
+    def supports_compaction(self, catalog: Catalog) -> bool:
+        """
+        Whether THIS engine can compact THIS catalog's tables. Compaction is a property of
+        the (engine, catalog) pair, not the catalog alone: DuckDB compacts DuckLake (in-
+        process rewrite/merge), Spark compacts Iceberg (rewrite_data_files); DuckDB's
+        Iceberg extension has no compaction step. Defaults to False.
+        """
+        return False
+
     def optimize(self, namespace: str) -> None:
         """Compact the catalog (merge small data files). The compaction benchmark times this."""
         raise NotImplementedError(f"{type(self).__name__} does not support compaction")

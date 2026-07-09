@@ -3,7 +3,7 @@
 -- vendored source schema (tpcds_source.sql) and DuckDB dialect. Resolves surrogate
 -- keys against the current version of each dimension (rec_end_date IS NULL) and
 -- computes the fact measures from the staged purchase source rows.
-CREATE OR REPLACE TEMP TABLE ssv AS
+CREATE OR REPLACE TEMPORARY VIEW ssv AS
 SELECT d_date_sk                                                           ss_sold_date_sk,
        t_time_sk                                                           ss_sold_time_sk,
        i_item_sk                                                           ss_item_sk,

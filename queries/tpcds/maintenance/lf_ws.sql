@@ -3,7 +3,7 @@
 -- tpcds-tools/tests/lf_ws_t.sql: that reference swaps the ws_web_page_sk / ws_web_site_sk
 -- columns and mislabels several net_* measures — here ws_web_page_sk = web_page and
 -- ws_web_site_sk = web_site, and the measures follow the (correct) catalog formulas.
-CREATE OR REPLACE TEMP TABLE wsv AS
+CREATE OR REPLACE TEMPORARY VIEW wsv AS
 SELECT d1.d_date_sk                                                        ws_sold_date_sk,
        t_time_sk                                                           ws_sold_time_sk,
        d2.d_date_sk                                                        ws_ship_date_sk,

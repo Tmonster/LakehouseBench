@@ -13,10 +13,10 @@ run_sweep() extends this over a range of depths (--dm-rounds-start/--dm-rounds-e
 re-provisions a fresh degenerate table at each depth and measures compaction, returning
 one result per depth so a single run_id captures the whole time-vs-rounds curve.
 
-DuckLake only for now (in-process merge_adjacent_files). DuckDB's Iceberg extension has
-no compaction step yet, so this benchmark raises for Iceberg catalogs (run_benchmark
-rejects it up front via catalog.supports_compaction); Spark/Iceberg compaction lands in
-a later phase.
+Compaction support depends on the (engine, catalog) pair: DuckDB compacts DuckLake
+(in-process merge_adjacent_files), Spark compacts Iceberg (rewrite_data_files). DuckDB's
+Iceberg extension has no compaction step, so DuckDB+Iceberg is rejected up front by
+run_benchmark via engine.supports_compaction(catalog).
 """
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 -- (the reference emits a 0 for it — dropped here), and the last credit column is named
 -- cr_store_credit, not cr_merchant_credit. cr_catalog_page_sk / cr_ship_mode_sk /
 -- cr_warehouse_sk are set to 0 as in the reference DM function.
-CREATE OR REPLACE TEMP TABLE crv AS
+CREATE OR REPLACE TEMPORARY VIEW crv AS
 SELECT d_date_sk                                                           cr_returned_date_sk,
        t_time_sk                                                           cr_returned_time_sk,
        i_item_sk                                                           cr_item_sk,

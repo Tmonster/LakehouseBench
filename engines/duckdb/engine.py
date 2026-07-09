@@ -88,6 +88,11 @@ class DuckDBEngine(Engine):
     def version(self) -> str:
         return duckdb.__version__
 
+    def supports_compaction(self, catalog: Catalog) -> bool:
+        # DuckDB compacts DuckLake (rewrite + merge_adjacent_files). Its Iceberg extension
+        # has no compaction step, so Iceberg catalogs are not compactable on DuckDB.
+        return isinstance(catalog, DuckLakeCatalog)
+
     def _use(self, namespace: str) -> None:
         if namespace != self._current_namespace:
             self._conn.execute(f"USE {self._catalog_alias}.{namespace}")
@@ -159,10 +164,8 @@ class DuckDBEngine(Engine):
         rename = {"delete": "dm_delete", "inventory_delete": "dm_inventory_delete"}
         for pq in sorted(round_dir.glob("*.parquet")):
             table = rename.get(pq.stem, pq.stem)
-            self._conn.execute(
-                f"CREATE OR REPLACE TEMP TABLE {table} AS "
-                f"SELECT * FROM read_parquet('{pq.absolute()}', hive_partitioning=false)"
-            )
+            query = f"CREATE OR REPLACE TEMP TABLE {table} AS SELECT * FROM read_parquet('{pq.absolute()}', hive_partitioning=false)"
+            self._conn.execute(query)
 
     # Target size (bytes) for compacted output files. Small data files below this are
     # candidates for consolidation; ~256 MB is a common lakehouse target file size.
@@ -180,11 +183,11 @@ class DuckDBEngine(Engine):
              delete-free files up to the target size.
 
         DuckLake only — DuckDB's Iceberg extension has no compaction/rewrite step yet, so
-        compaction on an Iceberg catalog raises (gated by catalog.supports_compaction).
+        compaction on an Iceberg catalog raises (gated by supports_compaction()).
         Snapshot expiry / orphan cleanup (space reclamation) are separate, via reclaim().
         """
         assert self._conn is not None, "Call setup() before optimize()"
-        if not self.catalog.supports_compaction:
+        if not self.supports_compaction(self.catalog):
             raise NotImplementedError(
                 "compaction is not supported for this catalog on DuckDB — DuckDB's Iceberg "
                 "extension has no compaction step yet (only DuckLake supports it)"
@@ -198,7 +201,7 @@ class DuckDBEngine(Engine):
     def reclaim(self, namespace: str) -> None:
         """Expire old snapshots and delete orphaned files (post-compaction reclamation)."""
         assert self._conn is not None, "Call setup() before reclaim()"
-        if not self.catalog.supports_compaction:
+        if not self.supports_compaction(self.catalog):
             raise NotImplementedError("reclaim is only implemented for the DuckLake catalog")
         self._conn.execute(
             f"CALL ducklake_expire_snapshots('{self._catalog_alias}', older_than => now())"
@@ -212,7 +215,7 @@ class DuckDBEngine(Engine):
         the file-count catalog view has no DuckDB Iceberg equivalent yet.
         """
         assert self._conn is not None, "Call setup() before table_stats()"
-        if not self.catalog.supports_compaction:
+        if not self.supports_compaction(self.catalog):
             raise NotImplementedError("table_stats is only implemented for the DuckLake catalog")
         row = self._conn.execute(f"""
             SELECT coalesce(sum(file_count), 0), coalesce(sum(file_size_bytes), 0),
@@ -235,6 +238,25 @@ class DuckDBEngine(Engine):
         for stmt in (s.strip() for s in stripped.split(";")):
             if stmt:
                 self._conn.execute(stmt)
+
+    def run_delete_fact(self, statements: list[str], namespace: str) -> None:
+        """
+        Run each Delete-Fact statement once per date range staged in dm_delete.
+
+        The range windows come from the staged dm_delete table (date1, date2); each
+        parameterized DELETE binds one window at a time. All deletes for the function
+        run in a single transaction (DuckLake) so the round commits atomically.
+        """
+        assert self._conn is not None, "Call setup() before run_delete_fact()"
+        self._use(namespace)
+        ranges = self._conn.execute("SELECT date1, date2 FROM dm_delete").fetchall()
+        if self._use_transactions:
+            self._conn.begin()
+        for stmt in statements:
+            for date1, date2 in ranges:
+                self._conn.execute(stmt, [date1, date2])
+        if self._use_transactions:
+            self._conn.commit()
 
     def fork_for_stream(self) -> _DuckDBCursorEngine:
         assert self._conn is not None, "Call setup() before fork_for_stream()"

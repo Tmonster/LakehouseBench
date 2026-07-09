@@ -3,7 +3,7 @@
 -- name sret_return_amount; the vendored source schema calls it sret_return_amt.
 -- Time-of-day is parsed from the HH:MM:SS return-time string; TRY_CAST guards
 -- against any non-numeric/degenerate values (they yield a NULL time key).
-CREATE OR REPLACE TEMP TABLE srv AS
+CREATE OR REPLACE TEMPORARY VIEW srv AS
 SELECT d_date_sk                                                           sr_returned_date_sk,
        t_time_sk                                                           sr_return_time_sk,
        i_item_sk                                                           sr_item_sk,

@@ -8,7 +8,13 @@ TPC-H benchmarks comparing query engines (DuckDB and Spark) and table formats
 | Engine | s3tables | Glue | Iceberg REST | DuckLake |
 |--------|----------|------|--------------|----------|
 | DuckDB | ✓ | ✓ | ✓ | ✓ |
-| Spark  | ✓ | ✗ | ✗ | ✗ |
+| Spark  | ✓ | ✗ | ✓ | ✗ |
+
+TPC-DS `maintenance` and `compaction` run on both engines: DuckDB compacts **DuckLake**
+(in-process rewrite/merge), Spark compacts **Iceberg** (`rewrite_data_files`). DuckDB's
+Iceberg extension has no compaction step, so DuckDB+Iceberg does maintenance but not
+compaction. The maintenance SQL is shared across engines (portable `TEMPORARY VIEW` +
+`INSERT`/`DELETE`).
 
 `table_format` is `iceberg` for s3tables/Glue/Iceberg REST and `ducklake` for DuckLake. DuckLake
 stores its Parquet data either locally (`config/ducklake_local.yml`) or on S3

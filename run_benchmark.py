@@ -129,11 +129,11 @@ def main() -> None:
             f"(supported: {supported})"
         )
 
-    # Fail fast on catalog-capability mismatches, before provisioning a large table.
-    if args.benchmark == "compaction" and not catalog.supports_compaction:
+    # Fail fast on capability mismatches, before provisioning a large table.
+    if args.benchmark == "compaction" and not engine.supports_compaction(catalog):
         parser.error(
-            f"the '{args.catalog_config}' catalog does not support compaction — DuckDB's "
-            "Iceberg extension has no compaction step yet (use a DuckLake catalog config)"
+            f"the {args.engine} engine cannot compact the '{args.catalog_config}' catalog "
+            "(DuckDB compacts DuckLake; Spark compacts Iceberg)"
         )
     if args.benchmark == "maintenance" and not catalog.engine_writable:
         parser.error(
@@ -240,8 +240,10 @@ def main() -> None:
                 warmup_runs=bench_cfg["warmup_runs"],
                 benchmark_runs=bench_cfg["benchmark_runs"],
                 # Reference answers only apply to the pristine load; skip verification
-                # once data-maintenance rounds have mutated the table.
-                verify=(args.dm_rounds == 0),
+                # once data-maintenance rounds have mutated the table. Answers are
+                # DuckDB-generated, so only verify DuckDB runs (Spark output formatting
+                # differs and would false-mismatch).
+                verify=(args.dm_rounds == 0 and args.engine == "duckdb"),
             )
             time_rows = [q_row(r) for r in results]
 

@@ -73,6 +73,96 @@ class SparkEngine(Engine):
             "(SELECT o_orderkey FROM _rf2_delete_keys)"
         )
 
+    def supports_compaction(self, catalog: Catalog) -> bool:
+        # Spark compacts Iceberg via rewrite_data_files. DuckLake is DuckDB-only (rejected
+        # in setup()), so any catalog reaching Spark here is Iceberg-backed.
+        return catalog.catalog_info().get("table_format") == "iceberg"
+
+    def load_staging(self, round_dir: Path, namespace: str) -> None:
+        """Register a DM round's Parquet files as session temp views (delete → dm_delete)."""
+        assert self._spark is not None, "Call setup() before load_staging()"
+        rename = {"delete": "dm_delete", "inventory_delete": "dm_inventory_delete"}
+        for pq in sorted(round_dir.glob("*.parquet")):
+            name = rename.get(pq.stem, pq.stem)
+            self._spark.read.parquet(str(pq.absolute())).createOrReplaceTempView(name)
+
+    def run_maintenance(self, sql: str, namespace: str) -> None:
+        """Execute one data-maintenance function (a multi-statement SQL script)."""
+        assert self._spark is not None, "Call setup() before run_maintenance()"
+        self._spark.sql(f"USE {self._catalog_alias}.{namespace}")
+        # Strip line comments so a ';' inside a -- comment doesn't split a statement.
+        stripped = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
+        for stmt in (s.strip() for s in stripped.split(";")):
+            if stmt:
+                self._spark.sql(stmt)
+
+    def run_delete_fact(self, statements: list[str], namespace: str) -> None:
+        """
+        Run each Delete-Fact statement once per date range staged in dm_delete.
+
+        The (date1, date2) windows are collected from the dm_delete temp view and inlined
+        as DATE literals — Spark's positional-arg binding (`?`) does not propagate into the
+        subquery of a DELETE ... WHERE col IN (SELECT ...), leaving the params unbound
+        (UNBOUND_SQL_PARAMETER). The windows come from our own generated parquet, so
+        literal substitution is safe here. This still avoids the date_dim × dm_delete join
+        that Spark planned as an expensive broadcast/semijoin over the full fact table.
+        """
+        assert self._spark is not None, "Call setup() before run_delete_fact()"
+        self._spark.sql(f"USE {self._catalog_alias}.{namespace}")
+        ranges = [(r["date1"], r["date2"]) for r in self._spark.sql("SELECT date1, date2 FROM dm_delete").collect()]
+        for stmt in statements:
+            for date1, date2 in ranges:
+                bound = stmt.replace("?", f"DATE '{date1}'", 1).replace("?", f"DATE '{date2}'", 1)
+                self._spark.sql(bound)
+
+    # Target compacted file size (bytes) — matches the DuckDB engine's 256 MB target.
+    _COMPACT_TARGET_BYTES = 256 * 1024 * 1024
+
+    def _namespace_tables(self, namespace: str) -> list[str]:
+        rows = self._spark.sql(f"SHOW TABLES IN {self._catalog_alias}.{namespace}").collect()
+        # SHOW TABLES yields (namespace, tableName, isTemporary); skip temp views (staging).
+        return [r["tableName"] for r in rows if not r["isTemporary"]]
+
+    def optimize(self, namespace: str) -> None:
+        """Compact each table in the namespace (Iceberg rewrite). The compaction benchmark times this."""
+        assert self._spark is not None, "Call setup() before optimize()"
+        if not self.supports_compaction(self.catalog):
+            raise NotImplementedError("compaction is only supported for Iceberg catalogs on Spark")
+        cat = self._catalog_alias
+        for t in self._namespace_tables(namespace):
+            fq = f"{namespace}.{t}"
+            # Rewrite data files carrying deletes (threshold 1 = any delete file) and
+            # bin-pack small files up to the target size, then consolidate delete files.
+            self._spark.sql(
+                f"CALL {cat}.system.rewrite_data_files(table => '{fq}', options => map("
+                f"'delete-file-threshold','1','min-input-files','2',"
+                f"'target-file-size-bytes','{self._COMPACT_TARGET_BYTES}'))"
+            )
+            self._spark.sql(f"CALL {cat}.system.rewrite_position_delete_files(table => '{fq}')")
+
+    def table_stats(self, namespace: str) -> dict[str, int]:
+        """Aggregate data/delete file counts + bytes across the namespace's Iceberg tables."""
+        assert self._spark is not None, "Call setup() before table_stats()"
+        if not self.supports_compaction(self.catalog):
+            raise NotImplementedError("table_stats is only supported for Iceberg catalogs on Spark")
+        cat = self._catalog_alias
+        fc = fb = dc = db = 0
+        for t in self._namespace_tables(namespace):
+            files = f"{cat}.{namespace}.{t}.files"
+            # content: 0 = data file, 1/2 = position/equality delete file.
+            r = self._spark.sql(
+                f"SELECT count(*) c, coalesce(sum(file_size_in_bytes),0) b FROM {files} WHERE content = 0"
+            ).collect()[0]
+            fc += r["c"]; fb += r["b"]
+            r = self._spark.sql(
+                f"SELECT count(*) c, coalesce(sum(file_size_in_bytes),0) b FROM {files} WHERE content <> 0"
+            ).collect()[0]
+            dc += r["c"]; db += r["b"]
+        return {
+            "file_count": int(fc), "file_size_bytes": int(fb),
+            "delete_file_count": int(dc), "delete_file_size_bytes": int(db),
+        }
+
     def teardown(self) -> None:
         if self._spark is not None:
             self._spark.stop()

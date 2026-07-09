@@ -12,17 +12,15 @@ class CatalogConfig:
 
 
 class Catalog(ABC):
-    # --- Engine capability flags (queried by engines to gate operations) ---
     # Whether the query engine can perform data-maintenance writes (INSERT/DELETE)
     # against this catalog's tables. All currently-supported catalogs (DuckLake, Iceberg
     # REST/Glue/S3Tables) are writable through DuckDB; the flag exists so a future
     # read-only catalog can gate itself out of the maintenance benchmark.
+    #
+    # Compaction support is NOT a catalog flag — it depends on the (engine, catalog)
+    # pair (DuckDB compacts DuckLake; Spark compacts Iceberg), so it lives on the engine
+    # as Engine.supports_compaction(catalog).
     engine_writable: bool = True
-
-    # Whether the engine exposes a compaction (small-file merge) operation for this
-    # catalog. Only DuckLake does today — DuckDB's Iceberg extension has no compaction
-    # step yet, so compaction on Iceberg raises NotImplementedError.
-    supports_compaction: bool = False
 
     def __init__(self, config: CatalogConfig):
         self.config = config

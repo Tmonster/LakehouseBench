@@ -49,9 +49,6 @@ def _storage_service(data_path: str) -> str:
 
 
 class DuckLakeCatalog(Catalog):
-    # DuckLake supports in-process compaction (rewrite + merge_adjacent_files).
-    supports_compaction = True
-
     def __init__(self, config: CatalogConfig):
         super().__init__(config)
         self.metadata_path = Path(config.extra.get("metadata_path", "ducklake/tpch.ducklake"))

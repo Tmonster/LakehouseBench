@@ -1,7 +1,7 @@
 -- LF_CS: Load-Fact catalog_sales. Adapted from tpcds-tools/tests/lf_cs_t.sql to the
 -- vendored source schema + DuckDB dialect. TRY_CAST guards the source's occasional
 -- degenerate order/ship dates (e.g. '-4713-11-2') that the reference blanks out by hand.
-CREATE OR REPLACE TEMP TABLE csv AS
+CREATE OR REPLACE TEMPORARY VIEW csv AS
 SELECT d1.d_date_sk                                                        cs_sold_date_sk,
        t_time_sk                                                           cs_sold_time_sk,
        d2.d_date_sk                                                        cs_ship_date_sk,

@@ -1,7 +1,7 @@
 -- LF_WR: Load-Fact web_returns. Adapted from tpcds-tools/tests/lf_wr_t.sql; this kit's
 -- web_returns schema lines up 1:1 with the reference view (24 columns), so only the
 -- date/time casts and the delete-free source column names needed adjusting.
-CREATE OR REPLACE TEMP TABLE wrv AS
+CREATE OR REPLACE TEMPORARY VIEW wrv AS
 SELECT d_date_sk                                                           wr_returned_date_sk,
        t_time_sk                                                           wr_returned_time_sk,
        i_item_sk                                                           wr_item_sk,

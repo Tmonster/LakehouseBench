@@ -18,3 +18,8 @@ s3_secret_access_key: password
 s3_url_style: path
 s3_use_ssl: false
 # s3_region: us-east-1   # uncomment if your MinIO/deployment needs a region
+
+# --- table properties for iceberg tables. 
+table_properties:
+  # match ducklake default table size
+  write.target-file-size-bytes: 524288000           # 500 MiB (500 * 1024 * 1024)
