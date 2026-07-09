@@ -106,11 +106,15 @@ def _compile_dsdgen() -> None:
     # Makefile's own -DLINUX define is preserved.
     os_name = "LINUX"
     if platform.system() == "Darwin":
-        # clang: the kit is pre-C99 K&R C; -Wno-everything silences the lot.
-        cflags = "-g -O2 -I. -Wno-everything"
+        # clang: the kit is pre-C99 K&R C; -Wno-everything silences the lot. clang still
+        # defaults to -fcommon, but pass it explicitly to match the Linux flags.
+        cflags = "-g -O2 -I. -Wno-everything -fcommon"
     else:
         # gcc: -std=gnu89 restores pre-C99 implicit-int/-decl semantics; -w drops warnings.
-        cflags = "-g -O2 -I. -std=gnu89 -w"
+        # -fcommon is REQUIRED on gcc >= 10 (default on modern Ubuntu, incl. ARM): the kit
+        # declares globals in headers without `extern`, so the gcc 10 default -fno-common
+        # makes dsdgen fail to link with "multiple definition of ..." errors.
+        cflags = "-g -O2 -I. -std=gnu89 -w -fcommon"
     print(f"Compiling dsdgen in {TOOLS_DIR} (OS={os_name})...")
     shutil.copy(TOOLS_DIR / "Makefile.suite", TOOLS_DIR / "Makefile")
     # Only build dsdgen — dsqgen needs lex/yacc and we already source the 99 queries
