@@ -20,7 +20,11 @@ duckdb = [
     "lakehouse-bench",
 ]
 spark = [
-    "pyspark>=4.0",
+    # Pin to Spark 4.0.x: the Iceberg runtime jar we load is iceberg-spark-runtime-4.0
+    # (Iceberg 1.10.x ships no 4.1 build). Spark 4.1 changed the DataSourceV2Relation.create
+    # signature, so a 4.1 runtime makes Iceberg's compaction actions fail with
+    # NoSuchMethodError. Keep pyspark and the Iceberg Spark runtime on the same minor.
+    "pyspark>=4.0,<4.1",
     "lakehouse-bench[duckdb]",
 ]
 plot = [
