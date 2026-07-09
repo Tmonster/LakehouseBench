@@ -9,8 +9,14 @@ Typical use is after N rounds of data maintenance (--dm-rounds N), which fragmen
 fact tables into many small files plus delete files; compaction then measures how long
 the engine takes to consolidate them.
 
-DuckLake only for now (in-process merge_adjacent_files); Spark/Iceberg compaction lands
-in a later phase.
+run_sweep() extends this over a range of depths (--dm-rounds-start/--dm-rounds-end): it
+re-provisions a fresh degenerate table at each depth and measures compaction, returning
+one result per depth so a single run_id captures the whole time-vs-rounds curve.
+
+DuckLake only for now (in-process merge_adjacent_files). DuckDB's Iceberg extension has
+no compaction step yet, so this benchmark raises for Iceberg catalogs (run_benchmark
+rejects it up front via catalog.supports_compaction); Spark/Iceberg compaction lands in
+a later phase.
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ class CompactionResult:
     stats_before: dict[str, int]
     stats_after: dict[str, int]
     error: str | None = None
+    dm_rounds: int | None = None   # DM depth this measurement was taken at (sweep mode)
 
 
 def _fmt(stats: dict[str, int]) -> str:
@@ -72,3 +79,38 @@ def run(runner: BenchmarkRunner, namespace: str) -> CompactionResult:
         stats_after=stats_after,
         error=error,
     )
+
+
+def run_sweep(runner, catalog, namespace, data_dir, tables, rounds: list[int]) -> list[CompactionResult]:
+    """
+    Measure compaction across several DM-round depths in one call — the caller records all
+    results under a single run_id, so plot_compaction.py draws one curve (time vs rounds).
+
+    Each depth needs its own *un-compacted* state: compaction is destructive and we want
+    the cumulative R-round fragmentation, so the table is re-provisioned from base Parquet
+    and R untimed rounds are re-applied before every measurement. This is O(sum(rounds)) of
+    data-maintenance work plus one base reload per depth — intentionally the slow, faithful
+    path.
+
+    The engine is detached around catalog.provision because a DuckLake metadata file can be
+    attached by only one connection at a time. After each measurement the catalog is
+    reclaimed (expire + cleanup) so the prior depth's files don't accumulate on disk.
+    """
+    from benchmarks import data_maintenance
+
+    engine = runner.engine
+    results: list[CompactionResult] = []
+    for i, r in enumerate(rounds):
+        print(f"\n=== compaction after {r} DM round(s)  [{i + 1}/{len(rounds)}] ===")
+        engine.teardown()                                    # release the metadata file
+        catalog.provision(namespace=namespace, data_dir=data_dir, tables=tables)
+        engine.setup(tables)
+        data_maintenance.provision_rounds(engine, namespace, data_dir, r)
+        res = run(runner, namespace)
+        res.dm_rounds = r
+        results.append(res)
+        try:
+            engine.reclaim(namespace)                        # drop this depth's orphaned files
+        except Exception as e:
+            print(f"  (reclaim skipped: {e})")
+    return results

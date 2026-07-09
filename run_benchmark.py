@@ -7,6 +7,9 @@ Usage:
     python run_benchmark.py --engine duckdb --benchmark composite --sf 10
     python run_benchmark.py --engine duckdb --benchmark analytical --keep-tables --namespace my_ns
     python run_benchmark.py --engine duckdb --benchmark analytical --skip-datagen --namespace my_ns
+    # Compaction sweep: measure compaction at DM depths 1..10 under one run_id
+    python run_benchmark.py --engine duckdb --benchmark compaction --suite tpcds --sf 10 \
+        --dm-rounds-start 1 --dm-rounds-end 10 --catalog-config config/ducklake_compaction.yml
 """
 from __future__ import annotations
 
@@ -55,6 +58,12 @@ def main() -> None:
                              "maintenance these rounds are timed; for other benchmarks they "
                              "are applied untimed as setup (mutating the table into a "
                              "post-maintenance state before measuring).")
+    parser.add_argument("--dm-rounds-start", type=int, default=None,
+                        help="Compaction sweep (with --dm-rounds-end): first DM depth. Measures "
+                             "compaction at each depth start..end, re-provisioning a fresh "
+                             "degenerate table per depth, all under one run_id.")
+    parser.add_argument("--dm-rounds-end", type=int, default=None,
+                        help="Compaction sweep: last DM depth (inclusive).")
     args = parser.parse_args()
 
     # Every recorded run must carry a machine identity — fail fast before any
@@ -84,6 +93,23 @@ def main() -> None:
     if args.benchmark == "maintenance" and args.dm_rounds < 1:
         parser.error("--benchmark maintenance requires --dm-rounds >= 1")
 
+    # Compaction sweep: measure compaction at each DM depth start..end under one run_id.
+    if (args.dm_rounds_start is None) != (args.dm_rounds_end is None):
+        parser.error("--dm-rounds-start and --dm-rounds-end must be given together")
+    sweep = args.dm_rounds_start is not None
+    if sweep:
+        if args.benchmark != "compaction":
+            parser.error("--dm-rounds-start/--dm-rounds-end are only valid for --benchmark compaction")
+        if suite.name != "tpcds":
+            parser.error("--dm-rounds-start/--dm-rounds-end are only valid for --suite tpcds")
+        if args.dm_rounds:
+            parser.error("use either --dm-rounds or --dm-rounds-start/--dm-rounds-end, not both")
+        if args.dm_rounds_start < 1 or args.dm_rounds_end < args.dm_rounds_start:
+            parser.error("require 1 <= --dm-rounds-start <= --dm-rounds-end")
+        if args.skip_datagen:
+            parser.error("--skip-datagen is incompatible with a compaction sweep (it re-provisions each depth)")
+    sweep_rounds = list(range(args.dm_rounds_start, args.dm_rounds_end + 1)) if sweep else None
+
     catalog_cfg = yaml.safe_load(Path(args.catalog_config).read_text())
     bench_cfg = yaml.safe_load(Path(args.benchmark_config).read_text())
 
@@ -103,6 +129,18 @@ def main() -> None:
             f"(supported: {supported})"
         )
 
+    # Fail fast on catalog-capability mismatches, before provisioning a large table.
+    if args.benchmark == "compaction" and not catalog.supports_compaction:
+        parser.error(
+            f"the '{args.catalog_config}' catalog does not support compaction — DuckDB's "
+            "Iceberg extension has no compaction step yet (use a DuckLake catalog config)"
+        )
+    if args.benchmark == "maintenance" and not catalog.engine_writable:
+        parser.error(
+            f"the '{args.catalog_config}' catalog is not engine-writable "
+            "(use DuckLake, S3Tables, Glue, or an Iceberg REST catalog)"
+        )
+
     runner = BenchmarkRunner(
         engine=engine,
         catalog=catalog,
@@ -112,8 +150,10 @@ def main() -> None:
     )
 
     # The load benchmark times provisioning itself — skip the pre-provision step.
-    # All other benchmarks provision first (unless --skip-datagen).
-    if args.benchmark != "load" and not args.skip_datagen:
+    # All other benchmarks provision first (unless --skip-datagen). The compaction sweep
+    # re-provisions a fresh table per DM depth inside its loop, so skip the one-shot
+    # provision + setup here.
+    if args.benchmark != "load" and not args.skip_datagen and not sweep:
         print(f"Provisioning namespace '{namespace}'...")
         catalog.provision(namespace=namespace, data_dir=data_dir, tables=tables)
 
@@ -121,7 +161,7 @@ def main() -> None:
     # The load benchmark provisions via the catalog (its own connection) and never uses
     # the engine object. Skipping setup avoids a second attach of DuckLake's local
     # metadata file, which DuckDB rejects as a file-handle conflict.
-    if args.benchmark != "load":
+    if args.benchmark != "load" and not sweep:
         engine.setup(tables)
 
     # TPC-DS: bring the table into a post-maintenance state before measuring. For
@@ -161,11 +201,12 @@ def main() -> None:
             benchmark="maintenance", namespace=namespace, dm_rounds=dm_rounds, suite=suite_name,
         )
 
-    def compaction_row(result):
+    def compaction_row(result, dm_rounds_override=None):
         return record.time_row_from_compaction(
             result, run_id=run_id, bench_instance_type=instance, engine=args.engine,
             engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
-            dm_rounds=dm_rounds, suite=suite_name,
+            dm_rounds=dm_rounds if dm_rounds_override is None else dm_rounds_override,
+            suite=suite_name,
         )
 
     # benchmark_start_time is scoped to the query phase — provisioning (done above,
@@ -216,9 +257,17 @@ def main() -> None:
 
         elif args.benchmark == "compaction":
             from benchmarks import compaction
-            result = compaction.run(runner=runner, namespace=namespace)
-            time_rows = [compaction_row(result)]
-            compaction_stats = (result.stats_before, result.stats_after)
+            if sweep_rounds:
+                results = compaction.run_sweep(
+                    runner, catalog, namespace, data_dir, tables, sweep_rounds
+                )
+                # One time row per depth (each carries its own dm_rounds + file counts);
+                # the single log row spans all depths, so leave its file-count columns null.
+                time_rows = [compaction_row(res, res.dm_rounds) for res in results]
+            else:
+                result = compaction.run(runner=runner, namespace=namespace)
+                time_rows = [compaction_row(result)]
+                compaction_stats = (result.stats_before, result.stats_after)
 
         elif args.benchmark == "power":
             from benchmarks import power

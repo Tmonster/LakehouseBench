@@ -33,8 +33,6 @@ def spark_catalog_alias(catalog: "Catalog") -> str:
     match props["type"]:
         case "s3tables":
             return "s3tablesbucket"
-        case "local":
-            return "local_iceberg"
         case _:
             raise ValueError(f"No Spark adapter for catalog type: {props['type']!r}")
 
@@ -44,8 +42,6 @@ def spark_config(catalog: "Catalog") -> dict[str, str]:
     match props["type"]:
         case "s3tables":
             return _s3tables_config(props)
-        case "local":
-            return _local_config(props)
         case _:
             raise ValueError(f"No Spark adapter for catalog type: {props['type']!r}")
 
@@ -83,19 +79,3 @@ def _s3tables_config(props: dict) -> dict[str, str]:
     }
 
 
-def _local_config(props: dict) -> dict[str, str]:
-    alias = "local_iceberg"
-    iceberg_runtime = (
-        f"org.apache.iceberg:iceberg-spark-runtime-{SPARK_VERSION}_2.13:{ICEBERG_VERSION}"
-    )
-    return {
-        "spark.jars.packages": iceberg_runtime,
-        "spark.sql.extensions": (
-            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
-        ),
-        f"spark.sql.catalog.{alias}": "org.apache.iceberg.spark.SparkCatalog",
-        f"spark.sql.catalog.{alias}.type": "hadoop",
-        f"spark.sql.catalog.{alias}.warehouse": props["warehouse_path"],
-        "spark.driver.host": "localhost",
-        "spark.driver.bindAddress": "127.0.0.1",
-    }

@@ -1,7 +1,7 @@
 from catalogs.base import Catalog, CatalogConfig
 from catalogs.ducklake import DuckLakeCatalog
 from catalogs.glue import GlueCatalog
-from catalogs.local import LocalCatalog
+from catalogs.iceberg_rest import IcebergRestCatalog
 from catalogs.s3tables import S3TablesCatalog
 
 
@@ -14,11 +14,11 @@ def load_catalog(config: dict) -> Catalog:
     match catalog_type:
         case "s3tables":
             return S3TablesCatalog(cfg)
-        case "local":
-            return LocalCatalog(cfg)
         case "ducklake":
             return DuckLakeCatalog(cfg)
         case "glue":
             return GlueCatalog(cfg)
+        case "iceberg_rest":
+            return IcebergRestCatalog(cfg)
         case _:
             raise ValueError(f"Unknown catalog type: {catalog_type!r}")

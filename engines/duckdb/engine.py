@@ -6,12 +6,10 @@ import duckdb
 
 from catalogs.base import Catalog
 from catalogs.ducklake import DuckLakeCatalog
-from catalogs.local import LocalCatalog
 from engines.base import Engine
 from engines.duckdb.catalog_adapters import (
     CATALOG_ALIAS,
     attach_catalog,
-    setup_local_views,
 )
 
 
@@ -99,16 +97,6 @@ class DuckDBEngine(Engine):
         self._conn = duckdb.connect()
         self._catalog_alias = attach_catalog(self._conn, self.catalog)
 
-        # Local catalogs need explicit view creation in place of ATTACH
-        if isinstance(self.catalog, LocalCatalog):
-            props = self.catalog.connection_properties()
-            setup_local_views(
-                conn=self._conn,
-                warehouse_path=props["warehouse_path"],
-                namespace=self.catalog.config.namespace,
-                tables=tables,
-            )
-
     def run_query(self, sql: str, namespace: str) -> tuple[list[tuple], list[str], int]:
         assert self._conn is not None, "Call setup() before run_query()"
         self._use(namespace)
@@ -162,6 +150,11 @@ class DuckDBEngine(Engine):
         keyword) to match the DF_ maintenance SQL.
         """
         assert self._conn is not None, "Call setup() before load_staging()"
+        if not self.catalog.engine_writable:
+            raise NotImplementedError(
+                "data maintenance requires an engine-writable catalog "
+                "(DuckLake, S3Tables, Glue, or an Iceberg REST catalog)"
+            )
         self._use(namespace)
         rename = {"delete": "dm_delete", "inventory_delete": "dm_inventory_delete"}
         for pq in sorted(round_dir.glob("*.parquet")):
@@ -186,14 +179,15 @@ class DuckDBEngine(Engine):
           2. merge_adjacent_files(max_file_size => target) — bin-packs the remaining small
              delete-free files up to the target size.
 
-        DuckLake only — the Iceberg extension is read-mostly and cannot rewrite data files
-        (Spark/Iceberg lands later). Snapshot expiry / orphan cleanup (space reclamation)
-        are separate, exposed via reclaim().
+        DuckLake only — DuckDB's Iceberg extension has no compaction/rewrite step yet, so
+        compaction on an Iceberg catalog raises (gated by catalog.supports_compaction).
+        Snapshot expiry / orphan cleanup (space reclamation) are separate, via reclaim().
         """
         assert self._conn is not None, "Call setup() before optimize()"
-        if not isinstance(self.catalog, DuckLakeCatalog):
+        if not self.catalog.supports_compaction:
             raise NotImplementedError(
-                "compaction is only implemented for the DuckLake catalog on DuckDB"
+                "compaction is not supported for this catalog on DuckDB — DuckDB's Iceberg "
+                "extension has no compaction step yet (only DuckLake supports it)"
             )
         alias = self._catalog_alias
         self._conn.execute(f"CALL ducklake_rewrite_data_files('{alias}', delete_threshold => 0.0)")
@@ -204,7 +198,7 @@ class DuckDBEngine(Engine):
     def reclaim(self, namespace: str) -> None:
         """Expire old snapshots and delete orphaned files (post-compaction reclamation)."""
         assert self._conn is not None, "Call setup() before reclaim()"
-        if not isinstance(self.catalog, DuckLakeCatalog):
+        if not self.catalog.supports_compaction:
             raise NotImplementedError("reclaim is only implemented for the DuckLake catalog")
         self._conn.execute(
             f"CALL ducklake_expire_snapshots('{self._catalog_alias}', older_than => now())"
@@ -214,10 +208,11 @@ class DuckDBEngine(Engine):
     def table_stats(self, namespace: str) -> dict[str, int]:
         """
         Aggregate catalog health metrics: data-file count/bytes and delete-file count/bytes.
-        Used to characterize the table state before/after compaction. DuckLake only.
+        Used to characterize the table state before/after compaction. DuckLake only —
+        the file-count catalog view has no DuckDB Iceberg equivalent yet.
         """
         assert self._conn is not None, "Call setup() before table_stats()"
-        if not isinstance(self.catalog, DuckLakeCatalog):
+        if not self.catalog.supports_compaction:
             raise NotImplementedError("table_stats is only implemented for the DuckLake catalog")
         row = self._conn.execute(f"""
             SELECT coalesce(sum(file_count), 0), coalesce(sum(file_size_bytes), 0),

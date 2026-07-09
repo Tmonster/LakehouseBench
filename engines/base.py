@@ -23,8 +23,8 @@ class Engine(ABC):
         """
         Initialize engine connection/session and attach catalog.
 
-        `tables` is the active suite's table list — used by engines that must
-        materialize per-table views (e.g. DuckDB over a local Iceberg catalog).
+        `tables` is the active suite's table list — available to engines that must
+        materialize per-table views or otherwise pre-register tables at setup time.
         """
 
     @abstractmethod
