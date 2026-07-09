@@ -23,3 +23,7 @@ s3_use_ssl: false
 table_properties:
   # match ducklake default table size
   write.target-file-size-bytes: 524288000           # 500 MiB (500 * 1024 * 1024)
+  write.delete.mode: merge-on-read
+  write.update.mode: merge-on-read
+  write.delete.mode: merge-on-read
+
