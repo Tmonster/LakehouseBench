@@ -101,6 +101,11 @@ class DuckDBEngine(Engine):
     def setup(self, tables: list[str]) -> None:
         self._conn = duckdb.connect()
         self._catalog_alias = attach_catalog(self._conn, self.catalog)
+        # Fresh connection has no USE context. Clear the cached namespace so the next
+        # _use() actually emits USE — otherwise a re-setup() within the same namespace
+        # (e.g. the compaction sweep, which tears down and rebuilds per depth) would keep
+        # a stale value and skip USE, leaving unqualified table names unresolved.
+        self._current_namespace = None
 
     def run_query(self, sql: str, namespace: str) -> tuple[list[tuple], list[str], int]:
         assert self._conn is not None, "Call setup() before run_query()"
@@ -253,3 +258,4 @@ class DuckDBEngine(Engine):
             self._conn.close()
             self._conn = None
             self._catalog_alias = None
+            self._current_namespace = None
