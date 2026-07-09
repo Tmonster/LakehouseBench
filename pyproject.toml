@@ -23,11 +23,6 @@ spark = [
     "pyspark>=4.0",
     "lakehouse-bench[duckdb]",
 ]
-local = [
-    # Only needed when using the local catalog (writes via PyIceberg instead of DuckDB)
-    "pyiceberg[s3,pyarrow]>=0.7",
-    "pyarrow>=14.0",
-]
 plot = [
     "seaborn>=0.13",
     "matplotlib>=3.8",
@@ -38,7 +33,7 @@ dev = [
     "ruff>=0.4",
 ]
 all = [
-    "lakehouse-bench[duckdb,spark,local]",
+    "lakehouse-bench[duckdb,spark]",
 ]
 
 [tool.hatch.build.targets.wheel]

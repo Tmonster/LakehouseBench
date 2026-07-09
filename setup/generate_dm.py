@@ -100,20 +100,23 @@ def _compile_dsdgen() -> None:
         )
         sys.exit(1)
 
-    os_name = "MACOS" if platform.system() == "Darwin" else "LINUX"
-    # The vendored TPC-DS tools are pre-C99 K&R C; modern clang/gcc reject implicit-int
-    # by default. -std=gnu89 restores the old semantics. We override only the OS-specific
-    # CFLAGS var so the Makefile's own -D<OS> define is preserved.
-    cflags = (
-        "-g -std=gnu89 -Wno-implicit-function-declaration "
-        "-Wno-deprecated-non-prototype -Wno-format -Wno-return-type"
-    )
+    # The official TPC-DS 4.0.0 kit (tpcds-tools) has no MACOS target, but it builds under
+    # the LINUX target on macOS once clang's diagnostics are silenced. Use OS=LINUX on both
+    # platforms and override LINUX_CFLAGS with warning-suppression flags per compiler; the
+    # Makefile's own -DLINUX define is preserved.
+    os_name = "LINUX"
+    if platform.system() == "Darwin":
+        # clang: the kit is pre-C99 K&R C; -Wno-everything silences the lot.
+        cflags = "-g -O2 -I. -Wno-everything"
+    else:
+        # gcc: -std=gnu89 restores pre-C99 implicit-int/-decl semantics; -w drops warnings.
+        cflags = "-g -O2 -I. -std=gnu89 -w"
     print(f"Compiling dsdgen in {TOOLS_DIR} (OS={os_name})...")
     shutil.copy(TOOLS_DIR / "Makefile.suite", TOOLS_DIR / "Makefile")
     # Only build dsdgen — dsqgen needs lex/yacc and we already source the 99 queries
     # from the DuckDB tpcds extension.
     subprocess.run(
-        ["make", f"OS={os_name}", f"{os_name}_CFLAGS={cflags}", "dsdgen"],
+        ["make", f"OS={os_name}", f"LINUX_CFLAGS={cflags}", "dsdgen"],
         cwd=TOOLS_DIR,
         check=True,
         stdout=subprocess.DEVNULL,
