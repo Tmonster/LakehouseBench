@@ -181,7 +181,11 @@ def main() -> None:
 
     # TPC-DS: bring the table into a post-maintenance state before measuring. For
     # --benchmark maintenance the rounds ARE the timed work (run below), so skip here.
-    if args.dm_rounds and args.benchmark not in ("load", "maintenance"):
+    # Also skip when --skip-datagen: the caller asserts the --namespace table is already
+    # at the desired depth (the lifecycle pattern advances it with `maintenance
+    # --dm-round-only K` between query runs), so re-applying rounds here would double-apply
+    # them. --dm-rounds still tags the recorded rows with the current depth for grouping.
+    if args.dm_rounds and args.benchmark not in ("load", "maintenance") and not args.skip_datagen:
         from benchmarks import data_maintenance
         data_maintenance.provision_rounds(engine, namespace, data_dir, args.dm_rounds)
 
