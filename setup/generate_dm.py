@@ -88,9 +88,40 @@ def parse_source_schemas(ddl_path: Path = SOURCE_DDL) -> dict[str, dict[str, str
 # Toolkit compilation
 # ---------------------------------------------------------------------------
 
+def _dsdgen_executable() -> bool:
+    """
+    True if a dsdgen binary exists AND can actually exec on this platform.
+
+    The tpcds-tools submodule tracks a prebuilt `dsdgen`, so a fresh checkout on a
+    different OS/arch (e.g. a Linux ARM host pulling a macOS/x86 binary) lands a binary
+    the kernel refuses to run ("Exec format error", ENOEXEC). Probe it with -help — the
+    exec fails at load time before the program runs, so an OSError means wrong-platform.
+    """
+    if not DSDGEN_BIN.exists():
+        return False
+    try:
+        # Absolute path: a relative command combined with cwd=TOOLS_DIR would resolve
+        # against the wrong directory and raise a spurious FileNotFoundError. A non-zero
+        # exit (e.g. -help printing usage) is fine — we only care that exec itself works.
+        subprocess.run(
+            [str(DSDGEN_BIN.resolve()), "-help"], cwd=TOOLS_DIR,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+        )
+    except OSError:
+        return False   # ENOEXEC (wrong OS/arch) or the binary can't be launched here
+    return True
+
+
 def _compile_dsdgen() -> None:
-    if DSDGEN_BIN.exists():
+    if _dsdgen_executable():
         return
+
+    # A wrong-platform binary may be checked out from the submodule (it tracks a prebuilt
+    # dsdgen). Remove it so the build below produces one for THIS OS/arch — otherwise the
+    # early-return above would keep handing back a binary that can't exec here.
+    if DSDGEN_BIN.exists():
+        print(f"Existing {DSDGEN_BIN} is not runnable on this platform — rebuilding.")
+        DSDGEN_BIN.unlink()
 
     if not (TOOLS_DIR / "Makefile.suite").exists():
         print(

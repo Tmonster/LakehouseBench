@@ -107,3 +107,19 @@ def run(runner: BenchmarkRunner, namespace: str, data_dir: Path, rounds: int) ->
     for u in range(1, rounds + 1):
         results.extend(apply_round(runner.engine, namespace, data_dir, u, record=True))
     return results
+
+
+def run_single(runner: BenchmarkRunner, namespace: str, data_dir: Path, u: int) -> list[OpResult]:
+    """
+    Run and time exactly one maintenance round `u` against the current table state.
+
+    Unlike run(), which always applies rounds 1..N from scratch, this applies only round u
+    — the incremental step used to advance a persistent table one round at a time (the
+    --dm-round-only / lifecycle pattern). The caller is responsible for having applied
+    rounds 1..u-1 already; each round's update set is an independent increment. Rows are
+    tagged with round=u, so they slot into the same per-round plots as run().
+    """
+    if u < 1:
+        raise ValueError("--dm-round-only requires a round number >= 1")
+    print(f"Running data-maintenance round {u} (single, timed)...")
+    return apply_round(runner.engine, namespace, data_dir, u, record=True)

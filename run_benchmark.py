@@ -58,6 +58,12 @@ def main() -> None:
                              "maintenance these rounds are timed; for other benchmarks they "
                              "are applied untimed as setup (mutating the table into a "
                              "post-maintenance state before measuring).")
+    parser.add_argument("--dm-round-only", type=int, default=None,
+                        help="TPC-DS maintenance only: apply and time EXACTLY this one round "
+                             "(round K, not 1..K) against an existing --namespace. Use with "
+                             "--skip-datagen --keep-tables to advance a persistent table one "
+                             "round at a time — the lifecycle pattern. Rows are tagged "
+                             "dm_rounds=K. Mutually exclusive with --dm-rounds.")
     parser.add_argument("--dm-rounds-start", type=int, default=None,
                         help="Compaction sweep (with --dm-rounds-end): first DM depth. Measures "
                              "compaction at each depth start..end, re-provisioning a fresh "
@@ -90,8 +96,17 @@ def main() -> None:
         )
     if args.dm_rounds and suite.name != "tpcds":
         parser.error("--dm-rounds is only valid for --suite tpcds")
-    if args.benchmark == "maintenance" and args.dm_rounds < 1:
-        parser.error("--benchmark maintenance requires --dm-rounds >= 1")
+    if args.dm_round_only is not None:
+        if args.benchmark != "maintenance":
+            parser.error("--dm-round-only is only valid for --benchmark maintenance")
+        if suite.name != "tpcds":
+            parser.error("--dm-round-only is only valid for --suite tpcds")
+        if args.dm_round_only < 1:
+            parser.error("--dm-round-only requires a round number >= 1")
+        if args.dm_rounds:
+            parser.error("use either --dm-rounds or --dm-round-only, not both")
+    if args.benchmark == "maintenance" and not args.dm_rounds and not args.dm_round_only:
+        parser.error("--benchmark maintenance requires --dm-rounds >= 1 or --dm-round-only K")
 
     # Compaction sweep: measure compaction at each DM depth start..end under one run_id.
     if (args.dm_rounds_start is None) != (args.dm_rounds_end is None):
@@ -175,7 +190,7 @@ def main() -> None:
     engine_version = engine.version()
 
     # dm_rounds tags every recorded row so results can be grouped by maintenance depth.
-    dm_rounds = args.dm_rounds
+    dm_rounds = args.dm_round_only or args.dm_rounds
     # suite ("tpch"/"tpcds") tags every row so otherwise-identical analytical/load rows
     # stay distinguishable across suites.
     suite_name = suite.name
@@ -249,12 +264,14 @@ def main() -> None:
 
         elif args.benchmark == "maintenance":
             from benchmarks import data_maintenance
-            results = data_maintenance.run(
-                runner=runner,
-                namespace=namespace,
-                data_dir=data_dir,
-                rounds=args.dm_rounds,
-            )
+            if args.dm_round_only:
+                results = data_maintenance.run_single(
+                    runner=runner, namespace=namespace, data_dir=data_dir, u=args.dm_round_only,
+                )
+            else:
+                results = data_maintenance.run(
+                    runner=runner, namespace=namespace, data_dir=data_dir, rounds=args.dm_rounds,
+                )
             time_rows = [dm_row(op) for op in results]
 
         elif args.benchmark == "compaction":
