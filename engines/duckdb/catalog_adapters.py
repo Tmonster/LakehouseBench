@@ -99,10 +99,14 @@ def _attach_s3tables(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
 
 
 def _attach_glue(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
-    conn.execute("""
+    # Pin the S3 region so httpfs hits the bucket's regional endpoint. Without it DuckDB
+    # defaults to us-east-1 and a bucket in another region (e.g. eu-central-1) answers
+    # 301 Moved Permanently on the first write.
+    region_clause = f",\n            REGION '{props['region']}'" if props.get("region") else ""
+    conn.execute(f"""
         CREATE SECRET IF NOT EXISTS aws_creds (
             TYPE S3,
-            PROVIDER CREDENTIAL_CHAIN
+            PROVIDER CREDENTIAL_CHAIN{region_clause}
         );
     """)
     # Glue does not manage storage: each CREATE TABLE supplies its own 'location'
