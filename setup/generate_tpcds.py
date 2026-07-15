@@ -28,7 +28,7 @@ import argparse
 import sys
 from pathlib import Path
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 from benchmarks.suite import TPCDS_TABLES
 
@@ -41,7 +41,7 @@ def generate_base(scale_factor: float, data_dir: Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     print(f"Generating TPC-DS data at scale factor {scale_factor} via the tpcds extension...")
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         conn.execute("INSTALL tpcds; LOAD tpcds;")
         conn.execute(f"CALL dsdgen(sf={scale_factor})")
         for table in TPCDS_TABLES:
@@ -58,7 +58,7 @@ def extract_queries(query_dir: Path = QUERY_DIR) -> None:
     query_dir.mkdir(parents=True, exist_ok=True)
     print(f"Writing TPC-DS query files → {query_dir}")
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         conn.execute("INSTALL tpcds; LOAD tpcds;")
         rows = conn.execute(
             "SELECT query_nr, query FROM tpcds_queries() ORDER BY query_nr"
@@ -98,7 +98,7 @@ def generate_answers(
     answer_dir.mkdir(parents=True, exist_ok=True)
     print(f"Generating TPC-DS answers for sf{scale_factor} → {answer_dir}")
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         for table in TPCDS_TABLES:
             src = (data_dir / f"{table}.parquet").absolute()
             conn.execute(

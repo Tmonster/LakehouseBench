@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 TPCH_TABLES = [
     "customer", "lineitem", "nation", "orders",
@@ -159,7 +159,7 @@ def _convert_tbl_to_parquet(tbl_file: Path, out: Path, col_types: dict[str, str]
     columns_sql = ", ".join(f"'{c}': '{t}'" for c, t in all_cols.items())
     select_cols = ", ".join(col_types.keys())
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         conn.execute(f"""
             COPY (
                 SELECT {select_cols}
@@ -263,8 +263,9 @@ def _compile_dbgen() -> None:
 
 
 def _run_tpcds(args) -> None:
-    """TPC-DS base + queries + answers via the DuckDB tpcds extension, plus optional
-    spec-faithful data-maintenance sets via the official dsdgen toolkit."""
+    """TPC-DS base tables + answers via the DuckDB tpcds extension, plus optional
+    spec-faithful data-maintenance sets via the official dsdgen toolkit. Query files are
+    vendored (not re-extracted here) — see the note below."""
     from setup import generate_tpcds
 
     data_dir = args.data_dir if args.data_dir is not None else Path("data/tpcds") / f"sf={args.sf}"
@@ -275,7 +276,10 @@ def _run_tpcds(args) -> None:
             file=sys.stderr,
         )
     generate_tpcds.generate_base(scale_factor=args.sf, data_dir=data_dir)
-    generate_tpcds.extract_queries()
+    # Query files are vendored under queries/tpcds/queries/ (and hand-patched for Spark
+    # compatibility — e.g. unquoted column aliases), so we do NOT re-extract them here;
+    # that would overwrite those fixes on every data-gen run. To regenerate from the DuckDB
+    # tpcds extension deliberately, run `python -m setup.generate_tpcds`.
     if not args.no_answers:
         generate_tpcds.generate_answers(scale_factor=args.sf, data_dir=data_dir)
     if args.dm_sets:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 from engines.duckdb.catalog_adapters import attach_catalog
 
@@ -24,7 +24,7 @@ def write_tables(catalog: "Catalog", namespace: str, data_dir: Path, tables: lis
 
 
 def _write_via_duckdb(catalog: "Catalog", namespace: str, data_dir: Path, tables: list[str]) -> None:
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         alias = attach_catalog(conn, catalog)
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {alias}.{namespace}")
         for table_name in tables:

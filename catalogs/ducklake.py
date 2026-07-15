@@ -66,10 +66,10 @@ class DuckLakeCatalog(Catalog):
         write_tables(catalog=self, namespace=namespace, data_dir=data_dir, tables=tables)
 
     def teardown(self, namespace: str, tables: list[str]) -> None:
-        import duckdb
+        from engines.duckdb.connect import connect as duckdb_connect
         from engines.duckdb.catalog_adapters import attach_catalog
 
-        with duckdb.connect() as conn:
+        with duckdb_connect() as conn:
             alias = attach_catalog(conn, self)
             for table in tables:
                 try:

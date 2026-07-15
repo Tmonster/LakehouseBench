@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 TOOLS_DIR = Path("tpcds-tools/tools")
 DSDGEN_BIN = TOOLS_DIR / "dsdgen"
@@ -174,7 +174,7 @@ def _convert_dat_to_parquet(dat_file: Path, out: Path, schema: dict[str, str]) -
     all_cols = {**schema, "_trailing": "VARCHAR"}
     columns_sql = ", ".join(f"'{c}': '{t}'" for c, t in all_cols.items())
     select_cols = ", ".join(schema.keys())
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         # quote='' disables quote handling — TPC-DS text fields contain bare apostrophes
         # and quotes that must be read literally. null_padding=true tolerates dsdgen's
         # habit of omitting trailing columns for some source tables (e.g. s_promotion),

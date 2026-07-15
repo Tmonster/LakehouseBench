@@ -11,6 +11,7 @@ from engines.duckdb.catalog_adapters import (
     CATALOG_ALIAS,
     attach_catalog,
 )
+from engines.duckdb.connect import connect as duckdb_connect
 
 
 class _DuckDBCursorEngine:
@@ -99,7 +100,7 @@ class DuckDBEngine(Engine):
             self._current_namespace = namespace
 
     def setup(self, tables: list[str]) -> None:
-        self._conn = duckdb.connect()
+        self._conn = duckdb_connect()
         self._catalog_alias = attach_catalog(self._conn, self.catalog)
         # Fresh connection has no USE context. Clear the cached namespace so the next
         # _use() actually emits USE — otherwise a re-setup() within the same namespace

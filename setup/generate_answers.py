@@ -18,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 TPCH_TABLES = [
     "customer", "lineitem", "nation", "orders",
@@ -49,7 +49,7 @@ def generate_answers(scale_factor: int, data_dir: Path) -> None:
         print(f"error: no query files found in {QUERY_DIR}.", file=sys.stderr)
         sys.exit(1)
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         # Load base tables so the queries resolve against this data.
         for table in TPCH_TABLES:
             src = data_dir / f"{table}.parquet"

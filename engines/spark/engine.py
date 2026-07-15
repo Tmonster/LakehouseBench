@@ -35,6 +35,10 @@ class SparkEngine(Engine):
             builder = builder.config(key, val)
 
         self._spark = builder.getOrCreate()
+        # Quiet the driver log: at WARN, TPC-DS queries with unpartitioned windows (q44,
+        # q49, q51, q67, ...) spam "No Partition Defined for Window operation!" per operator.
+        # ERROR keeps real failures visible while dropping that expected noise.
+        self._spark.sparkContext.setLogLevel("ERROR")
         self._catalog_alias = spark_catalog_alias(self.catalog)
 
     def run_query(self, sql: str, namespace: str) -> tuple[list[tuple], list[str], int]:

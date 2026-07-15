@@ -26,4 +26,5 @@ table_properties:
   write.delete.mode: merge-on-read
   write.update.mode: merge-on-read
   write.delete.mode: merge-on-read
+  write.manifest.compression-codec: gzip
 

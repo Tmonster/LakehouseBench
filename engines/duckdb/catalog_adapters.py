@@ -4,6 +4,7 @@ Each catalog type gets its own _attach_* function.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,34 @@ if TYPE_CHECKING:
     from catalogs.base import Catalog
 
 CATALOG_ALIAS = "iceberg_catalog"
+
+
+def _load_iceberg_extension(conn: duckdb.DuckDBPyConnection) -> None:
+    """
+    Load the iceberg extension, preferring a locally-built binary when configured.
+
+    Env-var driven so released DuckDB is unaffected:
+      * DUCKDB_ICEBERG_EXTENSION — path to a .duckdb_extension file: LOAD it directly and
+        skip INSTALL entirely (a hand-picked engine commit has no published binary to
+        INSTALL). The connection must have been opened with allow_unsigned_extensions
+        (see engines.duckdb.connect) since a local build is unsigned.
+      * DUCKDB_EXTENSION_REPO — a custom extension repository: point DuckDB at it, then
+        INSTALL/LOAD as usual (resolves per engine commit under <repo>/<source_id>/<plat>/).
+      * neither set — the default INSTALL iceberg; LOAD iceberg; unchanged.
+    """
+    ext_path = os.environ.get("DUCKDB_ICEBERG_EXTENSION")
+    repo = os.environ.get("DUCKDB_EXTENSION_REPO")
+    if ext_path:
+        conn.execute(f"LOAD '{ext_path}'")
+    elif not repo:
+    	conn.execute("INSTALL iceberg; LOAD iceberg")
+        # conn.execute(f"SET custom_extension_repository = '{repo}'")
+        # conn.execute("Install avro; load avro;")
+        # conn.execute("Install httpfs; load httpfs;")
+        # conn.execute("Install aws; load aws;")
+        # conn.execute("INSTALL iceberg; LOAD iceberg;")
+    # else:
+    #     conn.execute("INSTALL iceberg; LOAD iceberg;")
 
 
 def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
@@ -26,9 +55,10 @@ def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
     if catalog_type == "ducklake":
         return _attach_ducklake(conn, props)
 
-    conn.execute("INSTALL iceberg; LOAD iceberg;")
-    conn.execute("INSTALL aws; LOAD aws;")
-    conn.execute("INSTALL httpfs; LOAD httpfs;")
+    _load_iceberg_extension(conn)
+    # _load_iceberg_extension will install these if needed
+    # conn.execute("INSTALL aws; LOAD aws;")
+    # conn.execute("INSTALL httpfs; LOAD httpfs;")
 
     # turn off external file cache so results are not hot from cache
     conn.execute("pragma enable_external_file_cache=false")

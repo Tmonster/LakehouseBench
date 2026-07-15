@@ -19,7 +19,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 from benchmarks.runner import QueryResult
 
@@ -106,7 +106,7 @@ def _append_rows(target: Path, columns: list[tuple[str, str]], rows: list[tuple]
     cols_ddl = ", ".join(f'"{name}" {dtype}' for name, dtype in columns)
     placeholders = ", ".join(["?"] * len(columns))
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         conn.execute(f"CREATE TABLE _staging ({cols_ddl})")
         conn.executemany(f"INSERT INTO _staging VALUES ({placeholders})", rows)
 
