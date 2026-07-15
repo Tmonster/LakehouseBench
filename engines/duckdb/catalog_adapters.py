@@ -33,16 +33,12 @@ def _load_iceberg_extension(conn: duckdb.DuckDBPyConnection) -> None:
     repo = os.environ.get("DUCKDB_EXTENSION_REPO")
     if ext_path:
         conn.execute(f"LOAD '{ext_path}'")
-    elif not repo:
+    else if repo:
+		conn.execute(f"SET custom_extension_repository = '{repo}'")
+		conn.execute(f"SET autoinstall_extension_repository = '{repo}'")
+    else:
     	conn.execute("INSTALL iceberg; LOAD iceberg")
-        # conn.execute(f"SET custom_extension_repository = '{repo}'")
-        # conn.execute("Install avro; load avro;")
-        # conn.execute("Install httpfs; load httpfs;")
-        # conn.execute("Install aws; load aws;")
-        # conn.execute("INSTALL iceberg; LOAD iceberg;")
-    # else:
-    #     conn.execute("INSTALL iceberg; LOAD iceberg;")
-
+        
 
 def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
     """
@@ -136,7 +132,8 @@ def _attach_glue(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
     conn.execute(f"""
         CREATE SECRET IF NOT EXISTS aws_creds (
             TYPE S3,
-            PROVIDER CREDENTIAL_CHAIN{region_clause}
+            PROVIDER CREDENTIAL_CHAIN 
+            {region_clause}
         );
     """)
     # Glue does not manage storage: each CREATE TABLE supplies its own 'location'
