@@ -48,3 +48,32 @@ def execute_q1(con):
 	res.fetchall()
 	end = time.time()
 	print(f"Q1 execution time is {end - start}")
+
+
+"""
+.timer on
+CREATE SECRET (TYPE S3,KEY_ID 'admin',SECRET 'password',ENDPOINT '127.0.0.1:9000',URL_STYLE 'path',USE_SSL 0); ATTACH '' AS my_datalake (TYPE ICEBERG,CLIENT_ID 'admin',CLIENT_SECRET 'password',ENDPOINT 'http://127.0.0.1:8181'); Create schema if not exists my_datalake.default;
+use my_datalake.test_tpch_async_sf1;
+pragma enable_external_file_cache=false;
+select
+		l_returnflag,
+		l_linestatus,
+		sum(l_quantity) as sum_qty,
+		sum(l_extendedprice) as sum_base_price,
+		sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+		sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+		avg(l_quantity) as avg_qty,
+		avg(l_extendedprice) as avg_price,
+		avg(l_discount) as avg_disc,
+		count(*) as count_order
+		from
+		lineitem
+		where
+		l_shipdate <= date '1998-12-01' - interval '90' day
+		group by
+		l_returnflag,
+		l_linestatus
+		order by
+		l_returnflag,
+		l_linestatus;
+"""

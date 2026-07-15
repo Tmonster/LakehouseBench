@@ -71,3 +71,5 @@ f70d6932e3c54df08a38c669f0901eeb,2026-07-15T06:20:03.468066+00:00,2026-07-15T06:
 1dbf3af0e19f46458ee402c118f4b181,2026-07-15T08:52:25.676773+00:00,2026-07-15T08:52:37.897238+00:00,local-dev,analytical,bench_d409b347,1,duckdb,1.6.0.dev283,tpch,iceberg,iceberg-rest,iceberg-rest-local,,minio,,,,,0,,,,
 5128cd5715ac422b9cc200af3d313edf,2026-07-15T08:55:33.339014+00:00,2026-07-15T08:55:44.784653+00:00,local-dev,analytical,bench_e49368ab,1,duckdb,1.6.0.dev283,tpch,iceberg,iceberg-rest,iceberg-rest-local,,minio,,,,,0,,,,
 367bedd35b0a429aa81e62adcc854266,2026-07-15T08:58:09.252937+00:00,2026-07-15T08:58:31.429577+00:00,local-dev,analytical,bench_cb9eb844,1,duckdb,1.5.2,tpch,iceberg,iceberg-rest,iceberg-rest-local,,minio,,,,,0,,,,
+c2519bd91e2d4ec9b03a1b4342ec58e7,2026-07-15T09:16:14.944605+00:00,2026-07-15T09:16:37.913030+00:00,local-dev,analytical,test_tpch_async_sf1,1,duckdb,1.5.2,tpch,iceberg,iceberg-rest,iceberg-rest-local,,minio,,,,,0,,,,
+0c1111be1cd14411b0b015baf29c5bbc,2026-07-15T09:21:45.492288+00:00,2026-07-15T09:24:41.793746+00:00,local-dev,analytical,test_tpch_async_sf1,1,duckdb,1.6.0.dev283,tpch,iceberg,iceberg-rest,iceberg-rest-local,,minio,,,,,0,,,,
