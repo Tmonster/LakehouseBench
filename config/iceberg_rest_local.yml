@@ -1,0 +1,30 @@
+type: iceberg_rest
+table_format: iceberg
+# Plot series label; distinguishes configs sharing a catalog type.
+catalog_name: iceberg-rest-local
+namespace: benchmarks
+
+# --- Iceberg REST catalog (ATTACH) ---
+# ATTACH '<warehouse>' AS ... (TYPE ICEBERG, CLIENT_ID, CLIENT_SECRET, ENDPOINT)
+uri: http://127.0.0.1:8181
+warehouse: ""            # first ATTACH arg; empty in the manual setup
+client_id: admin
+client_secret: password
+
+# --- S3-compatible storage secret (MinIO) ---
+s3_endpoint: 127.0.0.1:9000
+s3_access_key_id: admin
+s3_secret_access_key: password
+s3_url_style: path
+s3_use_ssl: false
+# s3_region: us-east-1   # uncomment if your MinIO/deployment needs a region
+
+# --- table properties for iceberg tables. 
+table_properties:
+  # match ducklake default table size
+  write.target-file-size-bytes: 524288000           # 500 MiB (500 * 1024 * 1024)
+  write.delete.mode: merge-on-read
+  write.update.mode: merge-on-read
+  write.delete.mode: merge-on-read
+  write.manifest.compression-codec: gzip
+

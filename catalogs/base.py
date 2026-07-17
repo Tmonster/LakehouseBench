@@ -12,16 +12,26 @@ class CatalogConfig:
 
 
 class Catalog(ABC):
+    # Whether the query engine can perform data-maintenance writes (INSERT/DELETE)
+    # against this catalog's tables. All currently-supported catalogs (DuckLake, Iceberg
+    # REST/Glue/S3Tables) are writable through DuckDB; the flag exists so a future
+    # read-only catalog can gate itself out of the maintenance benchmark.
+    #
+    # Compaction support is NOT a catalog flag — it depends on the (engine, catalog)
+    # pair (DuckDB compacts DuckLake; Spark compacts Iceberg), so it lives on the engine
+    # as Engine.supports_compaction(catalog).
+    engine_writable: bool = True
+
     def __init__(self, config: CatalogConfig):
         self.config = config
 
     @abstractmethod
-    def provision(self, namespace: str, data_dir: Path) -> None:
-        """Create namespace and write TPC-H Iceberg tables from data_dir Parquet files."""
+    def provision(self, namespace: str, data_dir: Path, tables: list[str]) -> None:
+        """Create namespace and write the suite's tables from data_dir Parquet files."""
 
     @abstractmethod
-    def teardown(self, namespace: str) -> None:
-        """Drop namespace and all tables within it."""
+    def teardown(self, namespace: str, tables: list[str]) -> None:
+        """Drop the given tables and their namespace."""
 
     @abstractmethod
     def table_ref(self, table: str, namespace: str | None = None) -> str:

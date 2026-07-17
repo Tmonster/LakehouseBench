@@ -4,7 +4,7 @@ from typing import Any
 
 from catalogs.base import Catalog
 
-_ALL_BENCHMARKS = frozenset({"load", "analytical", "power", "throughput", "composite"})
+_ALL_BENCHMARKS = frozenset({"load", "analytical", "power", "throughput", "composite", "maintenance", "compaction"})
 
 
 class Engine(ABC):
@@ -19,8 +19,13 @@ class Engine(ABC):
         return "unknown"
 
     @abstractmethod
-    def setup(self) -> None:
-        """Initialize engine connection/session and attach catalog."""
+    def setup(self, tables: list[str]) -> None:
+        """
+        Initialize engine connection/session and attach catalog.
+
+        `tables` is the active suite's table list — available to engines that must
+        materialize per-table views or otherwise pre-register tables at setup time.
+        """
 
     @abstractmethod
     def run_query(self, sql: str, namespace: str) -> tuple[list[tuple], list[str], int]:
@@ -46,6 +51,31 @@ class Engine(ABC):
         RF2: delete rows from the live tables using local parquet delete keys.
         Reads delete_set_{set_n}.parquet from data_dir.
         """
+
+    def load_staging(self, round_dir: Path, namespace: str) -> None:
+        """Load a TPC-DS data-maintenance round's Parquet files into staging tables."""
+        raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
+
+    def run_maintenance(self, sql: str, namespace: str) -> None:
+        """Execute one TPC-DS data-maintenance function against the catalog."""
+        raise NotImplementedError(f"{type(self).__name__} does not support data maintenance")
+
+    def supports_compaction(self, catalog: Catalog) -> bool:
+        """
+        Whether THIS engine can compact THIS catalog's tables. Compaction is a property of
+        the (engine, catalog) pair, not the catalog alone: DuckDB compacts DuckLake (in-
+        process rewrite/merge), Spark compacts Iceberg (rewrite_data_files); DuckDB's
+        Iceberg extension has no compaction step. Defaults to False.
+        """
+        return False
+
+    def optimize(self, namespace: str) -> None:
+        """Compact the catalog (merge small data files). The compaction benchmark times this."""
+        raise NotImplementedError(f"{type(self).__name__} does not support compaction")
+
+    def table_stats(self, namespace: str) -> dict[str, int]:
+        """Return catalog health metrics (file/delete-file counts and sizes)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support table stats")
 
     def fork_for_stream(self) -> "Engine":
         """

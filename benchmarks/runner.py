@@ -99,11 +99,21 @@ class BenchmarkRunner:
 
 
 def _normalize(rows: list) -> list[tuple]:
-    """Sort rows and round floats to 2 decimal places for comparison."""
+    """
+    Sort rows and round floats to 2 decimal places for comparison.
+
+    NULLs are canonicalized to the empty string so a live query's None compares
+    equal to a CSV answer's empty field — DuckDB's CSV writer emits NULL as empty,
+    so this keeps live results and stored answers consistent (important for the many
+    TPC-DS rollup/grouping-set queries that emit NULLs).
+    """
     normalized = []
     for row in rows:
         norm_row = []
         for val in row:
+            if val is None:
+                norm_row.append("")
+                continue
             try:
                 norm_row.append(f"{float(val):.2f}")
             except (ValueError, TypeError):

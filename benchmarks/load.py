@@ -30,11 +30,12 @@ def run(
     namespace: str,
     data_dir: Path,
     scale_factor: int,
+    tables: list[str],
 ) -> LoadResult:
     error = None
     start = time.perf_counter()
     try:
-        catalog.provision(namespace=namespace, data_dir=data_dir)
+        catalog.provision(namespace=namespace, data_dir=data_dir, tables=tables)
     except Exception as e:
         error = str(e)
     elapsed = round(time.perf_counter() - start, 4)

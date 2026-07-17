@@ -7,6 +7,9 @@ Usage:
     python run_benchmark.py --engine duckdb --benchmark composite --sf 10
     python run_benchmark.py --engine duckdb --benchmark analytical --keep-tables --namespace my_ns
     python run_benchmark.py --engine duckdb --benchmark analytical --skip-datagen --namespace my_ns
+    # Compaction sweep: measure compaction at DM depths 1..10 under one run_id
+    python run_benchmark.py --engine duckdb --benchmark compaction --suite tpcds --sf 10 \
+        --dm-rounds-start 1 --dm-rounds-end 10 --catalog-config config/ducklake_compaction.yml
 """
 from __future__ import annotations
 
@@ -21,14 +24,26 @@ from catalogs import load_catalog
 from engines import load_engine
 from benchmarks import record
 from benchmarks.runner import BenchmarkRunner
+from benchmarks.suite import get_suite
 
-BENCHMARK_CHOICES = ["load", "analytical", "power", "throughput", "composite"]
+BENCHMARK_CHOICES = ["load", "analytical", "power", "throughput", "composite", "maintenance", "compaction"]
+SUITE_CHOICES = ["tpch", "tpcds"]
+
+# Benchmarks each suite supports. The TPC-H power/throughput/composite tests depend on
+# the TPC-H refresh model and are not defined for TPC-DS; maintenance/compaction are
+# TPC-DS-only for now.
+SUITE_BENCHMARKS = {
+    "tpch": {"load", "analytical", "power", "throughput", "composite"},
+    "tpcds": {"load", "analytical", "maintenance", "compaction"},
+}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--engine", required=True, choices=["duckdb", "spark", "athena"])
     parser.add_argument("--benchmark", required=True, choices=BENCHMARK_CHOICES)
+    parser.add_argument("--suite", default="tpch", choices=SUITE_CHOICES,
+                        help="Benchmark suite (default: tpch)")
     parser.add_argument("--sf", type=int, default=None, help="Override scale factor from config")
     parser.add_argument("--catalog-config", default="config/s3tables_catalog.yml")
     parser.add_argument("--benchmark-config", default="config/benchmark.yml")
@@ -38,6 +53,23 @@ def main() -> None:
                         help="Skip data generation and use existing data in --namespace")
     parser.add_argument("--update-streams", type=int, default=None,
                         help="Number of refresh sets in the throughput test (default: max(1, round(0.1 * sf)))")
+    parser.add_argument("--dm-rounds", type=int, default=0,
+                        help="TPC-DS only: data-maintenance rounds to apply. For --benchmark "
+                             "maintenance these rounds are timed; for other benchmarks they "
+                             "are applied untimed as setup (mutating the table into a "
+                             "post-maintenance state before measuring).")
+    parser.add_argument("--dm-round-only", type=int, default=None,
+                        help="TPC-DS maintenance only: apply and time EXACTLY this one round "
+                             "(round K, not 1..K) against an existing --namespace. Use with "
+                             "--skip-datagen --keep-tables to advance a persistent table one "
+                             "round at a time — the lifecycle pattern. Rows are tagged "
+                             "dm_rounds=K. Mutually exclusive with --dm-rounds.")
+    parser.add_argument("--dm-rounds-start", type=int, default=None,
+                        help="Compaction sweep (with --dm-rounds-end): first DM depth. Measures "
+                             "compaction at each depth start..end, re-provisioning a fresh "
+                             "degenerate table per depth, all under one run_id.")
+    parser.add_argument("--dm-rounds-end", type=int, default=None,
+                        help="Compaction sweep: last DM depth (inclusive).")
     args = parser.parse_args()
 
     # Every recorded run must carry a machine identity — fail fast before any
@@ -55,12 +87,51 @@ def main() -> None:
     if args.benchmark == "load" and args.skip_datagen:
         parser.error("--skip-datagen is not applicable to the load benchmark")
 
+    suite = get_suite(args.suite)
+    if args.benchmark not in SUITE_BENCHMARKS[suite.name]:
+        supported = ", ".join(sorted(SUITE_BENCHMARKS[suite.name]))
+        parser.error(
+            f"'{args.benchmark}' is not supported for the {suite.name} suite "
+            f"(supported: {supported})"
+        )
+    if args.dm_rounds and suite.name != "tpcds":
+        parser.error("--dm-rounds is only valid for --suite tpcds")
+    if args.dm_round_only is not None:
+        if args.benchmark != "maintenance":
+            parser.error("--dm-round-only is only valid for --benchmark maintenance")
+        if suite.name != "tpcds":
+            parser.error("--dm-round-only is only valid for --suite tpcds")
+        if args.dm_round_only < 1:
+            parser.error("--dm-round-only requires a round number >= 1")
+        if args.dm_rounds:
+            parser.error("use either --dm-rounds or --dm-round-only, not both")
+    if args.benchmark == "maintenance" and not args.dm_rounds and not args.dm_round_only:
+        parser.error("--benchmark maintenance requires --dm-rounds >= 1 or --dm-round-only K")
+
+    # Compaction sweep: measure compaction at each DM depth start..end under one run_id.
+    if (args.dm_rounds_start is None) != (args.dm_rounds_end is None):
+        parser.error("--dm-rounds-start and --dm-rounds-end must be given together")
+    sweep = args.dm_rounds_start is not None
+    if sweep:
+        if args.benchmark != "compaction":
+            parser.error("--dm-rounds-start/--dm-rounds-end are only valid for --benchmark compaction")
+        if suite.name != "tpcds":
+            parser.error("--dm-rounds-start/--dm-rounds-end are only valid for --suite tpcds")
+        if args.dm_rounds:
+            parser.error("use either --dm-rounds or --dm-rounds-start/--dm-rounds-end, not both")
+        if args.dm_rounds_start < 1 or args.dm_rounds_end < args.dm_rounds_start:
+            parser.error("require 1 <= --dm-rounds-start <= --dm-rounds-end")
+        if args.skip_datagen:
+            parser.error("--skip-datagen is incompatible with a compaction sweep (it re-provisions each depth)")
+    sweep_rounds = list(range(args.dm_rounds_start, args.dm_rounds_end + 1)) if sweep else None
+
     catalog_cfg = yaml.safe_load(Path(args.catalog_config).read_text())
     bench_cfg = yaml.safe_load(Path(args.benchmark_config).read_text())
 
     scale_factor = args.sf or bench_cfg["scale_factor"]
     namespace = args.namespace or f"bench_{uuid.uuid4().hex[:8]}"
-    data_dir = Path("data") / f"sf={scale_factor}"
+    data_dir = suite.data_dir(scale_factor)
+    tables = list(suite.tables)
     result_dir = Path(bench_cfg["result_dir"])
 
     catalog = load_catalog(catalog_cfg)
@@ -73,6 +144,18 @@ def main() -> None:
             f"(supported: {supported})"
         )
 
+    # Fail fast on capability mismatches, before provisioning a large table.
+    if args.benchmark == "compaction" and not engine.supports_compaction(catalog):
+        parser.error(
+            f"the {args.engine} engine cannot compact the '{args.catalog_config}' catalog "
+            "(DuckDB compacts DuckLake; Spark compacts Iceberg)"
+        )
+    if args.benchmark == "maintenance" and not catalog.engine_writable:
+        parser.error(
+            f"the '{args.catalog_config}' catalog is not engine-writable "
+            "(use DuckLake, S3Tables, Glue, or an Iceberg REST catalog)"
+        )
+
     runner = BenchmarkRunner(
         engine=engine,
         catalog=catalog,
@@ -82,32 +165,67 @@ def main() -> None:
     )
 
     # The load benchmark times provisioning itself — skip the pre-provision step.
-    # All other benchmarks provision first (unless --skip-datagen).
-    if args.benchmark != "load" and not args.skip_datagen:
+    # All other benchmarks provision first (unless --skip-datagen). The compaction sweep
+    # re-provisions a fresh table per DM depth inside its loop, so skip the one-shot
+    # provision + setup here.
+    if args.benchmark != "load" and not args.skip_datagen and not sweep:
         print(f"Provisioning namespace '{namespace}'...")
-        catalog.provision(namespace=namespace, data_dir=data_dir)
+        catalog.provision(namespace=namespace, data_dir=data_dir, tables=tables)
 
     print(f"\nRunning {args.benchmark} benchmark with {args.engine}...")
     # The load benchmark provisions via the catalog (its own connection) and never uses
     # the engine object. Skipping setup avoids a second attach of DuckLake's local
     # metadata file, which DuckDB rejects as a file-handle conflict.
-    if args.benchmark != "load":
-        engine.setup()
+    if args.benchmark != "load" and not sweep:
+        engine.setup(tables)
+
+    # TPC-DS: bring the table into a post-maintenance state before measuring. For
+    # --benchmark maintenance the rounds ARE the timed work (run below), so skip here.
+    # Also skip when --skip-datagen: the caller asserts the --namespace table is already
+    # at the desired depth (the lifecycle pattern advances it with `maintenance
+    # --dm-round-only K` between query runs), so re-applying rounds here would double-apply
+    # them. --dm-rounds still tags the recorded rows with the current depth for grouping.
+    if args.dm_rounds and args.benchmark not in ("load", "maintenance") and not args.skip_datagen:
+        from benchmarks import data_maintenance
+        data_maintenance.provision_rounds(engine, namespace, data_dir, args.dm_rounds)
+
     run_id = uuid.uuid4().hex
     instance = record.bench_instance_type()
     engine_version = engine.version()
+
+    # dm_rounds tags every recorded row so results can be grouped by maintenance depth.
+    dm_rounds = args.dm_round_only or args.dm_rounds
+    # suite ("tpch"/"tpcds") tags every row so otherwise-identical analytical/load rows
+    # stay distinguishable across suites.
+    suite_name = suite.name
 
     # Helpers that inject the per-run context (run_id/instance/version) into rows.
     def q_row(qr):
         return record.time_row_from_query(
             qr, run_id=run_id, bench_instance_type=instance, engine_version=engine_version,
+            dm_rounds=dm_rounds, suite=suite_name,
         )
 
     def rf_row(rf, benchmark):
         return record.time_row_from_refresh(
             rf, run_id=run_id, bench_instance_type=instance, engine=args.engine,
             engine_version=engine_version, scale_factor=scale_factor,
-            benchmark=benchmark, namespace=namespace,
+            benchmark=benchmark, namespace=namespace, dm_rounds=dm_rounds, suite=suite_name,
+        )
+
+    def dm_row(op):
+        return record.time_row_from_dm_op(
+            op, run_id=run_id, bench_instance_type=instance, engine=args.engine,
+            engine_version=engine_version, scale_factor=scale_factor,
+            benchmark="maintenance", namespace=namespace, dm_rounds=dm_rounds, suite=suite_name,
+        )
+
+    def compaction_row(result, dm_rounds_override=None):
+        return record.time_row_from_compaction(
+            result, run_id=run_id, bench_instance_type=instance, engine=args.engine,
+            engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
+            dm_rounds=dm_rounds if dm_rounds_override is None else dm_rounds_override,
+            suite=suite_name,
         )
 
     # benchmark_start_time is scoped to the query phase — provisioning (done above,
@@ -116,6 +234,7 @@ def main() -> None:
     benchmark_end = None
     time_rows: list[tuple] = []
     power_score = throughput_score = composite_score = None
+    compaction_stats = None   # (stats_before, stats_after) for the log row on compaction runs
     load_error = None
     try:
         if args.benchmark == "load":
@@ -126,6 +245,7 @@ def main() -> None:
                 namespace=namespace,
                 data_dir=data_dir,
                 scale_factor=scale_factor,
+                tables=tables,
             )
             load_error = result.error
 
@@ -133,12 +253,44 @@ def main() -> None:
             from benchmarks import analytical
             results = analytical.run(
                 runner=runner,
+                suite=suite,
                 namespace=namespace,
                 scale_factor=scale_factor,
                 warmup_runs=bench_cfg["warmup_runs"],
                 benchmark_runs=bench_cfg["benchmark_runs"],
+                # Reference answers only apply to the pristine load; skip verification
+                # once data-maintenance rounds have mutated the table. Answers are
+                # DuckDB-generated, so only verify DuckDB runs (Spark output formatting
+                # differs and would false-mismatch).
+                verify=(args.dm_rounds == 0 and args.engine == "duckdb"),
             )
             time_rows = [q_row(r) for r in results]
+
+        elif args.benchmark == "maintenance":
+            from benchmarks import data_maintenance
+            if args.dm_round_only:
+                results = data_maintenance.run_single(
+                    runner=runner, namespace=namespace, data_dir=data_dir, u=args.dm_round_only,
+                )
+            else:
+                results = data_maintenance.run(
+                    runner=runner, namespace=namespace, data_dir=data_dir, rounds=args.dm_rounds,
+                )
+            time_rows = [dm_row(op) for op in results]
+
+        elif args.benchmark == "compaction":
+            from benchmarks import compaction
+            if sweep_rounds:
+                results = compaction.run_sweep(
+                    runner, catalog, namespace, data_dir, tables, sweep_rounds
+                )
+                # One time row per depth (each carries its own dm_rounds + file counts);
+                # the single log row spans all depths, so leave its file-count columns null.
+                time_rows = [compaction_row(res, res.dm_rounds) for res in results]
+            else:
+                result = compaction.run(runner=runner, namespace=namespace)
+                time_rows = [compaction_row(result)]
+                compaction_stats = (result.stats_before, result.stats_after)
 
         elif args.benchmark == "power":
             from benchmarks import power
@@ -194,7 +346,7 @@ def main() -> None:
         engine.teardown()
         if not args.keep_tables and not args.skip_datagen:
             print(f"\nTearing down namespace '{namespace}'...")
-            catalog.teardown(namespace=namespace)
+            catalog.teardown(namespace=namespace, tables=tables)
 
         # The load benchmark has no per-query rows — its single timed unit is the
         # provisioning bracketed by benchmark_start/end.
@@ -203,8 +355,10 @@ def main() -> None:
                 run_id=run_id, bench_instance_type=instance, engine=args.engine,
                 engine_version=engine_version, scale_factor=scale_factor, namespace=namespace,
                 query_start_time=benchmark_start, query_end_time=benchmark_end, error=load_error,
+                dm_rounds=dm_rounds, suite=suite_name,
             )]
 
+        before, after = compaction_stats or (None, None)
         log = record.log_row(
             run_id=run_id,
             benchmark_start_time=benchmark_start,
@@ -218,6 +372,12 @@ def main() -> None:
             power_score=power_score,
             throughput_score=throughput_score,
             composite_score=composite_score,
+            dm_rounds=dm_rounds,
+            files_before=before["file_count"] if before else None,
+            files_after=after["file_count"] if after else None,
+            delete_files_before=before["delete_file_count"] if before else None,
+            delete_files_after=after["delete_file_count"] if after else None,
+            suite=suite_name,
             **catalog.catalog_info(),
         )
         record.append_log(result_dir, log)

@@ -11,3 +11,6 @@ base_location: s3://tom-playground-labs/LakehouseBench/duckdb-iceberg-glue
 table_properties:
   write.target-file-size-bytes: 524288000           # 500 MiB (500 * 1024 * 1024)
   write.parquet.row-group-size-bytes: 354833655
+  write.delete.mode: merge-on-read
+  write.update.mode: merge-on-read
+  write.delete.mode: merge-on-read

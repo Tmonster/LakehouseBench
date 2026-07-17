@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import duckdb
+from engines.duckdb.connect import connect as duckdb_connect
 
 TPCH_TABLES = [
     "customer", "lineitem", "nation", "orders",
@@ -159,7 +159,7 @@ def _convert_tbl_to_parquet(tbl_file: Path, out: Path, col_types: dict[str, str]
     columns_sql = ", ".join(f"'{c}': '{t}'" for c, t in all_cols.items())
     select_cols = ", ".join(col_types.keys())
 
-    with duckdb.connect() as conn:
+    with duckdb_connect() as conn:
         conn.execute(f"""
             COPY (
                 SELECT {select_cols}
@@ -262,9 +262,38 @@ def _compile_dbgen() -> None:
     print("dbgen compiled successfully.")
 
 
+def _run_tpcds(args) -> None:
+    """TPC-DS base tables + answers via the DuckDB tpcds extension, plus optional
+    spec-faithful data-maintenance sets via the official dsdgen toolkit. Query files are
+    vendored (not re-extracted here) — see the note below."""
+    from setup import generate_tpcds
+
+    data_dir = args.data_dir if args.data_dir is not None else Path("data/tpcds") / f"sf={args.sf}"
+    if args.refresh or args.query_streams:
+        print(
+            "note: --refresh/--query-streams are TPC-H flags; use --dm-sets for TPC-DS "
+            "data-maintenance sets.",
+            file=sys.stderr,
+        )
+    generate_tpcds.generate_base(scale_factor=args.sf, data_dir=data_dir)
+    # Query files are vendored under queries/tpcds/queries/ (and hand-patched for Spark
+    # compatibility — e.g. unquoted column aliases), so we do NOT re-extract them here;
+    # that would overwrite those fixes on every data-gen run. To regenerate from the DuckDB
+    # tpcds extension deliberately, run `python -m setup.generate_tpcds`.
+    if not args.no_answers:
+        generate_tpcds.generate_answers(scale_factor=args.sf, data_dir=data_dir)
+    if args.dm_sets:
+        from setup.generate_dm import generate_dm_sets
+        generate_dm_sets(scale_factor=args.sf, data_dir=data_dir, n_sets=args.dm_sets)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sf", type=int, default=1, help="TPC-H scale factor")
+    parser.add_argument("--suite", default="tpch", choices=["tpch", "tpcds"],
+                        help="Benchmark suite to generate (default: tpch)")
+    parser.add_argument("--sf", type=int, default=1, help="Scale factor")
+    parser.add_argument("--dm-sets", type=int, default=0,
+                        help="TPC-DS only: number of data-maintenance update sets to generate")
     parser.add_argument(
         "--data-dir", type=Path, default=None,
         help="Base data directory (default: data/<sf>)",
@@ -303,6 +332,11 @@ if __name__ == "__main__":
         help="Skip generating the TPC-H query answer files after the base tables",
     )
     args = parser.parse_args()
+
+    if args.suite == "tpcds":
+        _run_tpcds(args)
+        sys.exit(0)
+
     data_dir = args.data_dir if args.data_dir is not None else Path("data") / f"sf={args.sf}"
     generate(scale_factor=args.sf, data_dir=data_dir)
     if not args.no_answers:

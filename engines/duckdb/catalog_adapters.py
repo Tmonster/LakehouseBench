@@ -4,6 +4,7 @@ Each catalog type gets its own _attach_* function.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,30 @@ if TYPE_CHECKING:
 
 CATALOG_ALIAS = "iceberg_catalog"
 
+
+def _load_iceberg_extension(conn: duckdb.DuckDBPyConnection) -> None:
+    """
+    Load the iceberg extension, preferring a locally-built binary when configured.
+
+    Env-var driven so released DuckDB is unaffected:
+      * DUCKDB_ICEBERG_EXTENSION — path to a .duckdb_extension file: LOAD it directly and
+        skip INSTALL entirely (a hand-picked engine commit has no published binary to
+        INSTALL). The connection must have been opened with allow_unsigned_extensions
+        (see engines.duckdb.connect) since a local build is unsigned.
+      * DUCKDB_EXTENSION_REPO — a custom extension repository: point DuckDB at it, then
+        INSTALL/LOAD as usual (resolves per engine commit under <repo>/<source_id>/<plat>/).
+      * neither set — the default INSTALL iceberg; LOAD iceberg; unchanged.
+    """
+    ext_path = os.environ.get("DUCKDB_ICEBERG_EXTENSION")
+    repo = os.environ.get("DUCKDB_EXTENSION_REPO")
+    if ext_path:
+        conn.execute(f"LOAD '{ext_path}'")
+    else if repo:
+		conn.execute(f"SET custom_extension_repository = '{repo}'")
+		conn.execute(f"SET autoinstall_extension_repository = '{repo}'")
+    else:
+    	conn.execute("INSTALL iceberg; LOAD iceberg")
+        
 
 def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
     """
@@ -26,9 +51,10 @@ def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
     if catalog_type == "ducklake":
         return _attach_ducklake(conn, props)
 
-    conn.execute("INSTALL iceberg; LOAD iceberg;")
-    conn.execute("INSTALL aws; LOAD aws;")
-    conn.execute("INSTALL httpfs; LOAD httpfs;")
+    _load_iceberg_extension(conn)
+    # _load_iceberg_extension will install these if needed
+    # conn.execute("INSTALL aws; LOAD aws;")
+    # conn.execute("INSTALL httpfs; LOAD httpfs;")
 
     # turn off external file cache so results are not hot from cache
     conn.execute("pragma enable_external_file_cache=false")
@@ -40,10 +66,44 @@ def attach_catalog(conn: duckdb.DuckDBPyConnection, catalog: "Catalog") -> str:
             return _attach_s3tables(conn, props)
         case "glue":
             return _attach_glue(conn, props)
-        case "local":
-            return _attach_local(conn, props)
+        case "iceberg_rest":
+            return _attach_iceberg_rest(conn, props)
         case _:
             raise ValueError(f"No DuckDB catalog adapter for type: {catalog_type!r}")
+
+
+def _attach_iceberg_rest(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
+    """
+    Attach a self-hosted Iceberg REST catalog with an S3-compatible (e.g. MinIO) backend.
+
+    Emits an explicit S3 secret (KEY_ID/SECRET/ENDPOINT) rather than the AWS credential
+    chain, then ATTACHes the REST catalog with CLIENT_ID/CLIENT_SECRET + ENDPOINT.
+    """
+    sep = ",\n    "
+    if props.get("s3_endpoint"):
+        parts = [
+            "TYPE S3",
+            f"KEY_ID '{props['s3_access_key_id']}'",
+            f"SECRET '{props['s3_secret_access_key']}'",
+            f"ENDPOINT '{props['s3_endpoint']}'",
+            f"URL_STYLE '{props.get('s3_url_style', 'path')}'",
+            f"USE_SSL {1 if props.get('s3_use_ssl') else 0}",
+        ]
+        if props.get("s3_region"):
+            parts.append(f"REGION '{props['s3_region']}'")
+        conn.execute(f"CREATE OR REPLACE SECRET iceberg_rest_s3 (\n    {sep.join(parts)}\n);")
+
+    attach_opts = ["TYPE ICEBERG"]
+    if props.get("client_id"):
+        attach_opts.append(f"CLIENT_ID '{props['client_id']}'")
+    if props.get("client_secret"):
+        attach_opts.append(f"CLIENT_SECRET '{props['client_secret']}'")
+    attach_opts.append(f"ENDPOINT '{props['uri']}'")
+    warehouse = props.get("warehouse", "")
+    conn.execute(
+        f"ATTACH '{warehouse}' AS {CATALOG_ALIAS} (\n    {sep.join(attach_opts)}\n);"
+    )
+    return CATALOG_ALIAS
 
 
 def _attach_s3tables(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
@@ -65,10 +125,15 @@ def _attach_s3tables(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
 
 
 def _attach_glue(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
-    conn.execute("""
+    # Pin the S3 region so httpfs hits the bucket's regional endpoint. Without it DuckDB
+    # defaults to us-east-1 and a bucket in another region (e.g. eu-central-1) answers
+    # 301 Moved Permanently on the first write.
+    region_clause = f",\n            REGION '{props['region']}'" if props.get("region") else ""
+    conn.execute(f"""
         CREATE SECRET IF NOT EXISTS aws_creds (
             TYPE S3,
-            PROVIDER CREDENTIAL_CHAIN
+            PROVIDER CREDENTIAL_CHAIN 
+            {region_clause}
         );
     """)
     # Glue does not manage storage: each CREATE TABLE supplies its own 'location'
@@ -84,19 +149,6 @@ def _attach_glue(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
     return CATALOG_ALIAS
 
 
-def _attach_local(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
-    """
-    For local catalogs, create views over iceberg_scan() calls so unqualified
-    table names in TPC-H queries resolve correctly after USE <schema>.
-    Tables are written to the warehouse path by PyIceberg as standard Iceberg dirs.
-    """
-    # Local catalog uses direct path scanning rather than catalog attachment
-    # because DuckDB's ATTACH doesn't support SQLite-backed PyIceberg catalogs.
-    # Views are created in a DuckDB schema that mirrors the namespace.
-    return _LOCAL_ALIAS
-
-
-_LOCAL_ALIAS = "local_iceberg"
 _DUCKLAKE_ALIAS = "ducklake_catalog"
 
 
@@ -130,20 +182,11 @@ def _attach_ducklake(conn: duckdb.DuckDBPyConnection, props: dict) -> str:
     conn.execute(
         f"ATTACH 'ducklake:{metadata_path}' AS {_DUCKLAKE_ALIAS} (DATA_PATH '{data_path}')"
     )
+    # Optionally disable small-write inlining so every commit writes a real data file
+    # (see DuckLakeCatalog.data_inlining_row_limit). Persisted as a global DuckLake option.
+    limit = props.get("data_inlining_row_limit")
+    if limit is not None:
+        conn.execute(
+            f"CALL ducklake_set_option('{_DUCKLAKE_ALIAS}', 'data_inlining_row_limit', '{limit}')"
+        )
     return _DUCKLAKE_ALIAS
-
-
-def setup_local_views(
-    conn: duckdb.DuckDBPyConnection,
-    warehouse_path: str,
-    namespace: str,
-    tables: list[str],
-) -> None:
-    """Create DuckDB views that point to local Iceberg table directories."""
-    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {_LOCAL_ALIAS};")
-    for table in tables:
-        table_path = f"{warehouse_path}/{namespace}/{table}"
-        conn.execute(f"""
-            CREATE OR REPLACE VIEW {_LOCAL_ALIAS}.{table} AS
-            SELECT * FROM iceberg_scan('{table_path}');
-        """)

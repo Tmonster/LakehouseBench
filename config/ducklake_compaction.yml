@@ -1,0 +1,12 @@
+type: ducklake
+table_format: ducklake
+# Plot series label; distinguishes configs sharing a catalog type.
+catalog_name: ducklake-compaction
+namespace: benchmarks
+metadata_path: ducklake/tpcds.ducklake
+data_path: ducklake/tpcds_files
+# Force every commit to write a data file instead of inlining small writes into the
+# metadata catalog. This exposes the small-file degeneration that the compaction
+# benchmark measures (and matches how Iceberg/Delta behave). Omit for DuckLake's
+# default inlining behavior.
+data_inlining_row_limit: 0

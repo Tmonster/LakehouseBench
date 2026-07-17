@@ -1,3 +1,7 @@
 [submodule "duckdb-tpch-power-test"]
 	path = duckdb-tpch-power-test
 	url = https://github.com/duckdb/duckdb-tpch-power-test.git
+[submodule "tpcds-tools"]
+	path = tpcds-tools
+	url = https://github.com/Tmonster/tpcds-tools.git
+	branch = main
