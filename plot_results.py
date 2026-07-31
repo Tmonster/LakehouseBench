@@ -15,16 +15,27 @@ Bars show the median query time across that run's repetitions, with min/max whis
 Defaults to the analytical benchmark; other benchmark types have their own per-query
 semantics, but --benchmark lets you point this at them.
 
+--label-format is a str.format template controlling the legend series text, e.g.
+"{engine} {version} {catalog}" to drop the table format and scale factor. Available
+fields: engine, version/engine_version, catalog/catalog_name, format/table_format,
+sf/scale_factor, instance/bench_instance_type, run_id.
+--title replaces the generated plot title with text of your own.
+--rename overrides a field's value before labelling, e.g.
+--rename version:1.6.0.dev284=2.0.0 to show a dev build under its release name.
+
 Usage:
     uv run --extra plot python plot_results.py --sf 10 --instance m5.8xlarge
     uv run --extra plot python plot_results.py --sf 100 --instance m5.8xlarge --engine duckdb spark
     uv run --extra plot python plot_results.py --sf 100 --instance m5.8xlarge --catalog aws-glue
     uv run --extra plot python plot_results.py --run-ids 1a2b3c 4d5e6f   # exact runs
     uv run --extra plot python plot_results.py --sf 10 --instance m5.8xlarge --output analytical.png
+    uv run --extra plot python plot_results.py --sf 10 --instance m5.8xlarge \
+        --label-format "{engine} {version} {catalog}"
 """
 from __future__ import annotations
 
 import argparse
+import string
 import sys
 from pathlib import Path
 
@@ -33,6 +44,105 @@ import pandas as pd
 import seaborn as sns
 
 DEFAULT_OUTPUT_DIR = Path("results/images/tmp")
+
+# Placeholders accepted by --label-format, mapped to the column backing each one. Short
+# aliases sit alongside the raw column names so templates stay readable.
+LABEL_FIELDS = {
+    "engine": "engine",
+    "version": "engine_version",
+    "engine_version": "engine_version",
+    "catalog": "catalog_name",
+    "catalog_name": "catalog_name",
+    "format": "table_format",
+    "table_format": "table_format",
+    "sf": "scale_factor",
+    "scale_factor": "scale_factor",
+    "instance": "bench_instance_type",
+    "bench_instance_type": "bench_instance_type",
+    "run_id": "run_id",
+}
+
+DEFAULT_LABEL_FORMAT = "{engine} {version} {catalog} {format} sf{sf}"
+
+
+def label_format_fields(fmt: str) -> list[str]:
+    """Field names referenced by a --label-format template, in order, deduplicated."""
+    parsed = string.Formatter().parse(fmt)   # raises ValueError on malformed braces
+    names = [name for _, name, _, _ in parsed if name is not None]
+    # Strip any attribute/index access so {sf[0]}-style templates report the base field.
+    seen: dict[str, None] = {}
+    for name in names:
+        seen.setdefault(name.split(".")[0].split("[")[0], None)
+    return list(seen)
+
+
+def validate_label_format(fmt: str) -> None:
+    """Raise ValueError with the valid field list if the template can't be rendered."""
+    try:
+        fields = label_format_fields(fmt)
+    except ValueError as e:
+        raise ValueError(f"malformed --label-format template: {e}") from None
+    if any(f == "" or f.isdigit() for f in fields):
+        raise ValueError("--label-format uses named fields only, e.g. '{engine} {version}'")
+    unknown = sorted(set(fields) - set(LABEL_FIELDS))
+    if unknown:
+        raise ValueError(f"unknown field(s) in --label-format: {', '.join(unknown)}. "
+                         f"Available: {', '.join(sorted(LABEL_FIELDS))}")
+
+
+def make_labels(df: pd.DataFrame, fmt: str) -> pd.Series:
+    """
+    Render the template once per row into the series label driving hue and the legend.
+    Everything is stringified first, so scale factor 10 reads as 'sf10' rather than
+    'sf10.0' — meaning numeric format specs (e.g. {sf:0.1f}) are not supported.
+    """
+    available = {alias: col for alias, col in LABEL_FIELDS.items() if col in df.columns}
+    missing = sorted(set(label_format_fields(fmt)) - set(available))
+    if missing:
+        raise ValueError(f"--label-format field(s) not present in these results: "
+                         f"{', '.join(missing)}")
+    values = pd.DataFrame({alias: df[col].astype(str) for alias, col in available.items()},
+                          index=df.index)
+    return values.apply(lambda row: fmt.format(**row.to_dict()), axis=1)
+
+
+def parse_renames(specs: list[str]) -> list[tuple[str, str, str]]:
+    """
+    Parse --rename 'field:old=new' specs into (column, old, new) triples. The field is
+    any --label-format field name, so --rename version:1.6.0.dev284=2.0.0 rewrites
+    engine_version. Split on the first ':' and the first '=' after it, so values
+    containing either character still work as the replacement text.
+    """
+    parsed = []
+    for spec in specs:
+        field, sep, rest = spec.partition(":")
+        old, eq, new = rest.partition("=")
+        if not sep or not eq or not field or not old:
+            raise ValueError(f"malformed --rename {spec!r}, expected 'field:old=new' "
+                             f"e.g. 'version:1.6.0.dev284=2.0.0'")
+        if field not in LABEL_FIELDS:
+            raise ValueError(f"unknown field {field!r} in --rename. "
+                             f"Available: {', '.join(sorted(LABEL_FIELDS))}")
+        parsed.append((LABEL_FIELDS[field], old, new))
+    return parsed
+
+
+def apply_renames(df: pd.DataFrame, renames: list[tuple[str, str, str]]) -> pd.DataFrame:
+    """
+    Rewrite matching cell values in place, before labels are built — so the rename also
+    flows into series ordering and the run list printed at the end. Matching is exact on
+    the stringified value; a spec that matches nothing is an error rather than a silent
+    no-op, since it usually means a typo'd version string.
+    """
+    for col, old, new in renames:
+        if col not in df.columns:
+            raise ValueError(f"--rename field backing column {col!r} not present in these results")
+        matches = df[col].astype(str) == old
+        if not matches.any():
+            present = ", ".join(sorted(df[col].astype(str).unique()))
+            raise ValueError(f"--rename found no {col} equal to {old!r}. Present: {present}")
+        df.loc[matches, col] = new
+    return df
 
 
 def ensure_catalog_name(logs: pd.DataFrame) -> pd.DataFrame:
@@ -110,6 +220,8 @@ def load(
     results_dir: Path, benchmark: str, sf: int, instance: str,
     storage: str | None, engines: list[str] | None, engine_versions: list[str] | None,
     table_format: str | None, catalogs: list[str] | None, run_ids: list[str] | None,
+    label_format: str = DEFAULT_LABEL_FORMAT,
+    renames: list[tuple[str, str, str]] | None = None,
 ) -> pd.DataFrame:
     logs_path = results_dir / "logs.csv"
     time_path = results_dir / "time.csv"
@@ -138,14 +250,14 @@ def load(
 
     # Drop failed queries — they have no meaningful latency.
     df = df[df["error"].isna()]
-    df["label"] = (df["engine"] + " " + df["engine_version"].astype(str)
-                   + " " + df["catalog_name"].astype(str)
-                   + " " + df["table_format"].astype(str)
-                   + " sf" + df["scale_factor"].astype(str))
+    if renames:
+        df = apply_renames(df, renames)
+    df["label"] = make_labels(df, label_format)
     return df
 
 
-def plot(df: pd.DataFrame, benchmark: str, output: Path | None) -> None:
+def plot(df: pd.DataFrame, benchmark: str, output: Path | None,
+         label_format: str = DEFAULT_LABEL_FORMAT, title: str | None = None) -> None:
     # Order series by engine, then catalog, then table format, then version — so each
     # engine's bars are contiguous and catalogs/formats group together (rather than
     # sorting on the raw label, which interleaves them by version number).
@@ -175,12 +287,18 @@ def plot(df: pd.DataFrame, benchmark: str, output: Path | None) -> None:
 
     sfs = "/".join(f"sf{s}" for s in sorted(df["scale_factor"].unique()))
     instances = ", ".join(sorted(df["bench_instance_type"].dropna().unique())) or "unknown"
-    ax.set_title(f"{benchmark.capitalize()} query latency by engine/version/catalog/format — {sfs} on {instances}\n"
+    # An explicit --title replaces the generated one outright; \n in it still breaks lines.
+    ax.set_title(title if title is not None else
+                 f"{benchmark.capitalize()} query latency by engine/version/catalog/format — {sfs} on {instances}\n"
                  f"(most recent run per engine/version/catalog/format, median, min/max across runs)")
     ax.set_xlabel("Query")
     ax.set_ylabel("Elapsed (s)")
+    # Name the legend after whatever the labels actually contain, so a custom
+    # --label-format doesn't leave a stale heading above the series.
+    legend_title = ("Engine version + catalog + format" if label_format == DEFAULT_LABEL_FORMAT
+                    else " + ".join(label_format_fields(label_format)))
     # Legend beneath the plot, spread across columns, so the axes use the full width.
-    ax.legend(title="Engine version + catalog + format",
+    ax.legend(title=legend_title,
               loc="upper center", bbox_to_anchor=(0.5, -0.12),
               ncol=min(len(labels), 4))
     fig.tight_layout()
@@ -218,7 +336,29 @@ def main() -> None:
                         help="Plot exactly these run_ids (bypasses the latest-per-engine/catalog/format selection and other filters)")
     parser.add_argument("--output", "-o", type=Path, default=None,
                         help="Save to file (default: results/images/tmp/<benchmark>.png)")
+    parser.add_argument("--title", default=None,
+                        help="Replace the generated plot title with this text "
+                             "(use \\n for a second line)")
+    parser.add_argument("--label-format", default=DEFAULT_LABEL_FORMAT,
+                        help="str.format template for the legend series label "
+                             f"(default: {DEFAULT_LABEL_FORMAT!r}). "
+                             f"Fields: {', '.join(sorted(LABEL_FIELDS))}")
+    parser.add_argument("--rename", nargs="+", default=None, metavar="FIELD:OLD=NEW",
+                        help="Override a field value before labelling, e.g. "
+                             "--rename version:1.6.0.dev284=2.0.0. Repeatable; also "
+                             "affects series ordering and the printed run list")
     args = parser.parse_args()
+
+    try:
+        validate_label_format(args.label_format)
+        renames = parse_renames(args.rename or [])
+    except ValueError as e:
+        parser.error(str(e))
+
+    # The shell passes "\n" through as two characters; turn it into a real line break so
+    # a two-line custom title works the way the generated one does.
+    if args.title is not None:
+        args.title = args.title.replace("\\n", "\n")
 
     # Scale factor and instance type pin a single environment per plot; required
     # unless the user is hand-picking exact runs with --run-ids.
@@ -227,8 +367,12 @@ def main() -> None:
         if missing:
             parser.error(f"the following arguments are required: {', '.join(missing)} (or use --run-ids)")
 
-    df = load(args.results_dir, args.benchmark, args.sf, args.instance, args.storage,
-              args.engine, args.engine_version, args.table_format, args.catalog, args.run_ids)
+    try:
+        df = load(args.results_dir, args.benchmark, args.sf, args.instance, args.storage,
+                  args.engine, args.engine_version, args.table_format, args.catalog,
+                  args.run_ids, args.label_format, renames)
+    except ValueError as e:
+        parser.error(str(e))
     if df.empty:
         print(f"No {args.benchmark} results found for the given filters.", file=sys.stderr)
         sys.exit(1)
@@ -238,11 +382,18 @@ def main() -> None:
                  .drop_duplicates().sort_values("label"))
     for label, run_id, started in runs_info.itertuples(index=False):
         print(f"  {run_id}  {label}  (started {started})")
+    # A --label-format that omits a distinguishing field makes separate runs share a
+    # label, which silently pools them into one bar. Say so rather than plotting a lie.
+    collapsed = runs_info["label"].value_counts()
+    for label, count in collapsed[collapsed > 1].items():
+        print(f"warning: {count} runs share the label {label!r} and will be pooled into "
+              f"one series — add a field to --label-format to separate them",
+              file=sys.stderr)
     # Copy-pasteable: pin this exact set of runs regardless of future data.
     print(f"\nReplot exactly these runs:\n  --run-ids {' '.join(runs_info['run_id'].tolist())}")
 
     output = args.output or (DEFAULT_OUTPUT_DIR / f"{args.benchmark}.png")
-    plot(df, args.benchmark, output)
+    plot(df, args.benchmark, output, args.label_format, args.title)
 
 
 if __name__ == "__main__":
